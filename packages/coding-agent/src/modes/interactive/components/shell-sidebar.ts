@@ -2,11 +2,12 @@ import type { Component } from "@mariozechner/pi-tui";
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/pi-tui";
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
-import { theme } from "../theme/theme.js";
+import { type ThemeColor, theme } from "../theme/theme.js";
 
 type SidebarSection = {
 	label: string;
 	value: string;
+	color?: ThemeColor;
 };
 
 function formatTokens(count: number): string {
@@ -20,6 +21,15 @@ function formatTokens(count: number): string {
 /**
  * Read-only right sidebar panel showing model, context, resources, and session state.
  */
+function truncateSectionValue(value: string): string {
+	const items = value
+		.split(", ")
+		.map((s) => s.trim())
+		.filter(Boolean);
+	if (items.length <= 3) return value;
+	return `${items.slice(0, 2).join(", ")}, … (${items.length})`;
+}
+
 export class ShellSidebarComponent implements Component {
 	private height = 0;
 	private resourceSections: SidebarSection[] = [];
@@ -64,7 +74,7 @@ export class ShellSidebarComponent implements Component {
 		};
 
 		const section = (label: string, value: string): string[] => {
-			return [blank, ...wrapLine(theme.fg("dim", label)), ...wrapLine(value)];
+			return [blank, ...wrapLine(theme.fg("muted", label)), ...wrapLine(value)];
 		};
 
 		const topLines: string[] = [];
@@ -72,7 +82,7 @@ export class ShellSidebarComponent implements Component {
 
 		const model = this.session.model;
 		if (model) {
-			topLines.push(...wrapLine(theme.fg("dim", model.provider)));
+			topLines.push(...wrapLine(theme.fg("muted", model.provider)));
 			topLines.push(...wrapLine(theme.fg("accent", model.id)));
 		} else {
 			topLines.push(...wrapLine(theme.fg("muted", "no model")));
@@ -80,7 +90,7 @@ export class ShellSidebarComponent implements Component {
 
 		const thinkingLevel = this.session.thinkingLevel;
 		if (model?.reasoning && thinkingLevel !== "off") {
-			topLines.push(...section("Thinking", theme.fg("muted", thinkingLevel)));
+			topLines.push(...section("Thinking", thinkingLevel));
 		}
 
 		let totalInput = 0;
@@ -93,16 +103,14 @@ export class ShellSidebarComponent implements Component {
 		}
 
 		if (totalInput > 0 || totalOutput > 0) {
-			topLines.push(
-				...section("Usage", theme.fg("muted", `↑${formatTokens(totalInput)} ↓${formatTokens(totalOutput)}`)),
-			);
+			topLines.push(...section("Usage", `↑${formatTokens(totalInput)} ↓${formatTokens(totalOutput)}`));
 		}
 
 		const contextUsage = this.session.getContextUsage();
 		if (contextUsage && contextUsage.percent !== null) {
 			const pct = contextUsage.percent.toFixed(1);
 			const window = formatTokens(contextUsage.contextWindow);
-			const color = contextUsage.percent > 90 ? "error" : contextUsage.percent > 70 ? "warning" : "muted";
+			const color = contextUsage.percent > 90 ? "error" : contextUsage.percent > 70 ? "warning" : "text";
 			topLines.push(...section("Context", theme.fg(color, `${pct}% / ${window}`)));
 		}
 
@@ -113,16 +121,18 @@ export class ShellSidebarComponent implements Component {
 
 		const branch = this.footerData.getGitBranch();
 		if (branch) {
-			bottomLines.push(...section("Branch", theme.fg("muted", branch)));
+			bottomLines.push(...section("Branch", branch));
 		}
 
 		const sessionName = this.session.sessionManager.getSessionName();
 		if (sessionName) {
-			bottomLines.push(...section("Session", theme.fg("muted", sessionName)));
+			bottomLines.push(...section("Session", sessionName));
 		}
 
 		for (const resourceSection of this.resourceSections) {
-			bottomLines.push(...section(resourceSection.label, theme.fg("muted", resourceSection.value)));
+			const display = truncateSectionValue(resourceSection.value);
+			const colored = resourceSection.color ? theme.fg(resourceSection.color as ThemeColor, display) : display;
+			bottomLines.push(...section(resourceSection.label, colored));
 		}
 
 		const maxBottomHeight = Math.max(0, this.height - topLines.length);

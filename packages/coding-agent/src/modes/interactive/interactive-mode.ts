@@ -206,7 +206,8 @@ export class InteractiveMode {
 	private editorContainer: Container;
 	private interactionContainer: Container;
 	private dockTransientContainer: Container;
-	private dockHints: Text;
+	private dockHintsText: Text;
+	private dockHints: Container;
 	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
 	private dockComponent: ShellDockComponent;
@@ -310,6 +311,8 @@ export class InteractiveMode {
 
 	// Sidebar visibility state (actual display also depends on terminal width)
 	private sidebarVisible = true;
+	private extensionSidebarSections: Array<{ label: string; value: string }> | undefined = undefined;
+	private lastBuiltinSidebarSections: Array<{ label: string; value: string }> = [];
 
 	private static readonly SIDEBAR_WIDTH = 30;
 	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
@@ -348,7 +351,10 @@ export class InteractiveMode {
 		this.widgetContainerBelow = new Container();
 		this.interactionContainer = new Container();
 		this.dockTransientContainer = new Container();
-		this.dockHints = new Text("", 0, 0);
+		this.dockHintsText = new Text("", 0, 0);
+		this.dockHints = new Container();
+		this.dockHints.addChild(new Spacer(1));
+		this.dockHints.addChild(this.dockHintsText);
 		this.shellLayout = new HorizontalSplit(
 			this.transcriptViewport,
 			null,
@@ -705,7 +711,7 @@ export class InteractiveMode {
 			rawKeyHint("!", "bash"),
 			keyHint("app.tools.expand", "more"),
 		].join(theme.fg("muted", " · "));
-		this.dockHints.setText(theme.fg("dim", hints));
+		this.dockHintsText.setText(hints);
 	}
 
 	/**
@@ -1256,6 +1262,34 @@ export class InteractiveMode {
 		return this.formatDisplayPath(p);
 	}
 
+	private formatDiagnosticsCompact(label: string, diagnostics: readonly ResourceDiagnostic[]): string {
+		const errors = diagnostics.filter((d) => d.type === "error").length;
+		const warnings = diagnostics.filter((d) => d.type === "warning").length;
+		const collisions = diagnostics.filter((d) => d.type === "collision").length;
+
+		const parts: string[] = [];
+		if (errors > 0) parts.push(`${errors} error${errors > 1 ? "s" : ""}`);
+		if (warnings > 0) {
+			// Detect common message patterns for friendlier labels
+			const sampleMsg = diagnostics.find((d) => d.type === "warning")?.message ?? "";
+			const isNamingMismatch = sampleMsg.includes("does not match parent directory");
+			parts.push(
+				isNamingMismatch
+					? `${warnings} name/directory mismatch${warnings > 1 ? "es" : ""}`
+					: `${warnings} warning${warnings > 1 ? "s" : ""}`,
+			);
+		}
+		if (collisions > 0) parts.push(`${collisions} collision${collisions > 1 ? "s" : ""}`);
+
+		const severity = errors > 0 ? "error" : "warning";
+		const icon = errors > 0 ? "✗" : "⚠";
+		return (
+			theme.fg(severity, `${icon} ${label}`) +
+			theme.fg("muted", `  ${parts.join(", ")}`) +
+			theme.fg("dim", "  · /reload for details")
+		);
+	}
+
 	private formatDiagnostics(diagnostics: readonly ResourceDiagnostic[], sourceInfos: Map<string, SourceInfo>): string {
 		const lines: string[] = [];
 
@@ -1313,9 +1347,11 @@ export class InteractiveMode {
 		extensions?: Array<{ path: string; sourceInfo?: SourceInfo }>;
 		force?: boolean;
 		showDiagnosticsWhenQuiet?: boolean;
+		showFullDiagnostics?: boolean;
 	}): void {
 		const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
 		const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
+		const showFullDiagnostics = options?.showFullDiagnostics === true;
 		const updateSidebar =
 			typeof this.sidebarComponent === "object" &&
 			this.sidebarComponent !== null &&
@@ -1512,24 +1548,33 @@ export class InteractiveMode {
 		}
 
 		if (updateSidebar) {
-			this.sidebarComponent.setResourceSections(sidebarSections);
+			this.lastBuiltinSidebarSections = sidebarSections;
+			if (!this.extensionSidebarSections) {
+				this.sidebarComponent.setResourceSections(sidebarSections);
+			}
 		}
 
 		if (showDiagnostics) {
 			const skillDiagnostics = skillsResult.diagnostics;
 			if (skillDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
-				this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Skill conflicts]")}\n${warningLines}`, 0, 0));
-				this.chatContainer.addChild(new Spacer(1));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
+					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Skill issues]")}\n${warningLines}`, 0, 0));
+				} else {
+					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Skills", skillDiagnostics), 0, 0));
+				}
 			}
 
 			const promptDiagnostics = promptsResult.diagnostics;
 			if (promptDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
-				this.chatContainer.addChild(
-					new Text(`${theme.fg("warning", "[Prompt conflicts]")}\n${warningLines}`, 0, 0),
-				);
-				this.chatContainer.addChild(new Spacer(1));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Prompt issues]")}\n${warningLines}`, 0, 0),
+					);
+				} else {
+					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Prompts", promptDiagnostics), 0, 0));
+				}
 			}
 
 			const extensionDiagnostics: ResourceDiagnostic[] = [];
@@ -1548,17 +1593,34 @@ export class InteractiveMode {
 			extensionDiagnostics.push(...shortcutDiagnostics);
 
 			if (extensionDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
-				this.chatContainer.addChild(
-					new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
-				);
-				this.chatContainer.addChild(new Spacer(1));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
+					);
+				} else {
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Extensions", extensionDiagnostics), 0, 0),
+					);
+				}
 			}
 
 			const themeDiagnostics = themesResult.diagnostics;
 			if (themeDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
-				this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Theme conflicts]")}\n${warningLines}`, 0, 0));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
+					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Theme issues]")}\n${warningLines}`, 0, 0));
+				} else {
+					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Themes", themeDiagnostics), 0, 0));
+				}
+			}
+
+			const hasAny =
+				skillDiagnostics.length > 0 ||
+				promptDiagnostics.length > 0 ||
+				extensionDiagnostics.length > 0 ||
+				themeDiagnostics.length > 0;
+			if (hasAny) {
 				this.chatContainer.addChild(new Spacer(1));
 			}
 		}
@@ -2056,6 +2118,11 @@ export class InteractiveMode {
 			},
 			getToolsExpanded: () => this.toolOutputExpanded,
 			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
+			setSidebarSections: (sections) => {
+				this.extensionSidebarSections = sections;
+				this.sidebarComponent.setResourceSections(sections ?? this.lastBuiltinSidebarSections);
+				this.ui.requestRender();
+			},
 		};
 	}
 
@@ -2568,6 +2635,18 @@ export class InteractiveMode {
 			if (text === "/session") {
 				this.handleSessionCommand();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/vanity") {
+				this.editor.setText("");
+				const injection = await this.handleVanityCommand();
+				if (injection) {
+					this.flushPendingBashComponents();
+					if (this.onInputCallback) {
+						this.editor.addToHistory?.(injection);
+						this.onInputCallback(injection);
+					}
+				}
 				return;
 			}
 			if (text === "/changelog") {
@@ -4599,6 +4678,7 @@ export class InteractiveMode {
 			this.showLoadedResources({
 				force: false,
 				showDiagnosticsWhenQuiet: true,
+				showFullDiagnostics: true,
 			});
 			const modelsJsonError = this.session.modelRegistry.getError();
 			if (modelsJsonError) {
@@ -4831,6 +4911,48 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", `Session name set: ${name}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	private async handleVanityCommand(): Promise<string | null> {
+		const skills = this.session.resourceLoader.getSkills().skills;
+		const branch = this.footerDataProvider.getGitBranch();
+		const contextUsage = this.session.getContextUsage();
+		const model = this.session.model;
+
+		const topOptions: string[] = [];
+		const pct = contextUsage?.percent !== null ? `${contextUsage?.percent?.toFixed(1)}%` : "?";
+		topOptions.push(`Session Health  (${pct} context)`);
+		if (skills.length > 0) topOptions.push(`Skills  (${skills.length})`);
+		if (branch) topOptions.push(`Git  (${branch})`);
+
+		const section = await this.showExtensionSelector("Vanity — navigate session context", topOptions);
+		if (!section) return null;
+
+		if (section.startsWith("Session Health")) {
+			const modelLabel = model ? `${model.provider}/${model.id}` : "no model";
+			const contextLabel = contextUsage?.percent !== null ? `${contextUsage?.percent?.toFixed(1)}% used` : "unknown";
+			const actions = [`Back`, `Run /compact`];
+			const choice = await this.showExtensionSelector(`Session Health\n${modelLabel} · ${contextLabel}`, actions);
+			if (choice === "Run /compact") return "/compact";
+			return null;
+		}
+
+		if (section.startsWith("Skills")) {
+			const skillNames = skills.map((s) => s.name);
+			const choice = await this.showExtensionSelector(`Skills (${skills.length})`, skillNames);
+			if (!choice) return null;
+			return `Tell me about skill: ${choice}`;
+		}
+
+		if (section.startsWith("Git")) {
+			const gitOptions = ["Show recent commits", "Show dirty files", "Back"];
+			const choice = await this.showExtensionSelector(`Git · ${branch}`, gitOptions);
+			if (choice === "Show recent commits") return "Show recent git commits (run: git log --oneline -10)";
+			if (choice === "Show dirty files") return "Show git status and dirty files (run: git status)";
+			return null;
+		}
+
+		return null;
 	}
 
 	private handleSessionCommand(): void {

@@ -63,6 +63,10 @@ export class FooterComponent implements Component {
 	}
 
 	render(width: number): string[] {
+		return this.renderFooter(width);
+	}
+
+	private renderFooter(width: number): string[] {
 		const state = this.session.state;
 
 		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
@@ -108,23 +112,21 @@ export class FooterComponent implements Component {
 			pwd = `${pwd} • ${sessionName}`;
 		}
 
-		// theme.fg resets only the foreground (\x1b[39m), so nesting fg calls means text after
-		// an inner color segment loses the outer color. Apply dim to each segment independently.
-		const d = (s: string) => theme.fg("dim", s);
-
 		// Build styled stat segments individually
+		const m = (s: string) => theme.fg("muted", s);
+
 		const seg: string[] = [];
-		if (totalInput) seg.push(d(`↑${formatTokens(totalInput)}`));
-		if (totalOutput) seg.push(d(`↓${formatTokens(totalOutput)}`));
-		if (totalCacheRead) seg.push(d(`R${formatTokens(totalCacheRead)}`));
-		if (totalCacheWrite) seg.push(d(`W${formatTokens(totalCacheWrite)}`));
+		if (totalInput) seg.push(m(`↑${formatTokens(totalInput)}`));
+		if (totalOutput) seg.push(m(`↓${formatTokens(totalOutput)}`));
+		if (totalCacheRead) seg.push(m(`R${formatTokens(totalCacheRead)}`));
+		if (totalCacheWrite) seg.push(m(`W${formatTokens(totalCacheWrite)}`));
 
 		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
 		if (totalCost || usingSubscription) {
-			seg.push(d(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`));
+			seg.push(m(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`));
 		}
 
-		// Context percentage: colored when approaching limits, plain dim otherwise
+		// Context percentage: colored when approaching limits, plain muted otherwise
 		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
 		const contextPercentDisplay =
 			contextPercent === "?"
@@ -135,11 +137,11 @@ export class FooterComponent implements Component {
 		} else if (contextPercentValue > 70) {
 			seg.push(theme.fg("warning", contextPercentDisplay));
 		} else {
-			seg.push(d(contextPercentDisplay));
+			seg.push(m(contextPercentDisplay));
 		}
 
 		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			seg.push(d(`provider:${state.model.provider}`));
+			seg.push(m(`provider:${state.model.provider}`));
 		}
 
 		// Extension statuses
@@ -148,10 +150,10 @@ export class FooterComponent implements Component {
 			const sorted = Array.from(extensionStatuses.entries())
 				.sort(([a], [b]) => a.localeCompare(b))
 				.map(([, text]) => sanitizeStatusText(text));
-			seg.push(d(`· ${sorted.join(" ")}`));
+			seg.push(m(`· ${sorted.join(" ")}`));
 		}
 
-		const combined = d(pwd) + d("  ") + seg.join(d(" "));
-		return [truncateToWidth(combined, width, d("..."))];
+		const combined = m(pwd) + m("  ") + seg.join(m(" "));
+		return [truncateToWidth(combined, width, m("..."))];
 	}
 }

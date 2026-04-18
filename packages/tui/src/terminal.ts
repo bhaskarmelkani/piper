@@ -100,8 +100,8 @@ export class ProcessTerminal implements Terminal {
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
 
-		// Enable SGR mouse button+scroll tracking (\x1b[?1000h = button events, \x1b[?1006h = SGR encoding)
-		process.stdout.write("\x1b[?1000h\x1b[?1006h");
+		// Mouse button tracking is intentionally disabled to allow native terminal text selection.
+		// Transcript scroll is available via keyboard (arrow keys, Page Up/Down).
 
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
@@ -272,8 +272,7 @@ export class ProcessTerminal implements Terminal {
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
-		// Disable SGR mouse tracking
-		process.stdout.write("\x1b[?1000l\x1b[?1006l");
+		// Mouse tracking was not enabled, nothing to disable here.
 
 		// Restore main screen buffer (shows shell as it was before piper started)
 		process.stdout.write("\x1b[?1049l");

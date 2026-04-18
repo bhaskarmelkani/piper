@@ -240,6 +240,13 @@ export interface ExtensionUIContext {
 
 	/** Set tool output expansion state. */
 	setToolsExpanded(expanded: boolean): void;
+
+	/**
+	 * Replace the sidebar's resource sections with custom content.
+	 * Pass undefined to restore the built-in sections (skills, prompts, etc.).
+	 * Sections are label/value pairs rendered in the right sidebar panel.
+	 */
+	setSidebarSections(sections: Array<{ label: string; value: string; color?: string }> | undefined): void;
 }
 
 // ============================================================================

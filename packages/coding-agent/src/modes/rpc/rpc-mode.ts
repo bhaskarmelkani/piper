@@ -283,6 +283,10 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 		setToolsExpanded(_expanded: boolean) {
 			// Tool expansion not supported in RPC mode - no TUI
 		},
+
+		setSidebarSections(_sections) {
+			// Sidebar not available in RPC mode
+		},
 	});
 
 	const rebindSession = async (): Promise<void> => {
