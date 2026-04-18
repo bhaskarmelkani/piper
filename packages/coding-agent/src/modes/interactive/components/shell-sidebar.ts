@@ -16,12 +16,21 @@ import {
 /**
  * Read-only right sidebar panel showing model, context, resources, and session state.
  */
-function truncateSectionValue(value: string): string {
-	const items = value
+function normalizeSectionText(value: unknown): string {
+	if (typeof value !== "string") {
+		return "";
+	}
+	return value.trim();
+}
+
+function truncateSectionValue(value: unknown): string {
+	const text = normalizeSectionText(value);
+	if (!text) return "";
+	const items = text
 		.split(", ")
 		.map((s) => s.trim())
 		.filter(Boolean);
-	if (items.length <= 3) return value;
+	if (items.length <= 3) return text;
 	return `${items.slice(0, 2).join(", ")}, … (${items.length})`;
 }
 
@@ -178,9 +187,13 @@ export class ShellSidebarComponent implements Component {
 		}
 
 		for (const resourceSection of this.resourceSections) {
+			const label = normalizeSectionText(resourceSection.label);
 			const display = truncateSectionValue(resourceSection.value);
+			if (!label || !display) {
+				continue;
+			}
 			const colored = resourceSection.color ? theme.fg(resourceSection.color as ThemeColor, display) : display;
-			bottomLines.push(...section(resourceSection.label, colored));
+			bottomLines.push(...section(label, colored));
 		}
 
 		const maxBottomHeight = Math.max(0, this.height - topLines.length);

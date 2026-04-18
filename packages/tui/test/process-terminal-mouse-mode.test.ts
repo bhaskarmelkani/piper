@@ -94,7 +94,7 @@ describe("ProcessTerminal mouse mode", () => {
 		Object.defineProperty(global, "setTimeout", { value: originalSetTimeout, configurable: true });
 	});
 
-	it("enables alternate screen, bracketed paste, and normal mouse tracking on start", () => {
+	it("enables alternate screen, bracketed paste, and ordered mouse tracking on start", () => {
 		terminal.start(
 			() => {},
 			() => {},
@@ -102,7 +102,7 @@ describe("ProcessTerminal mouse mode", () => {
 
 		assert.ok(writes.includes("\x1b[?1049h\x1b[2J\x1b[H"));
 		assert.ok(writes.includes("\x1b[?2004h"));
-		assert.ok(writes.includes("\x1b[?1007l\x1b[?1000h\x1b[?1006h"));
+		assert.ok(writes.includes("\x1b[?1002l\x1b[?1003l\x1b[?1007l\x1b[?1006h\x1b[?1000h"));
 		assert.ok(writes.includes("\x1b[?u"));
 		assert.deepStrictEqual(rawModes, [true]);
 		assert.ok(stdoutListeners.some((entry) => entry.event === "resize"));
@@ -119,7 +119,7 @@ describe("ProcessTerminal mouse mode", () => {
 		terminal.stop();
 
 		assert.ok(writes.includes("\x1b[?2004l"));
-		assert.ok(writes.includes("\x1b[?1000l\x1b[?1006l\x1b[?1007l"));
+		assert.ok(writes.includes("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1007l"));
 		assert.ok(writes.includes("\x1b[?1049l"));
 		assert.deepStrictEqual(rawModes, [true, false]);
 	});

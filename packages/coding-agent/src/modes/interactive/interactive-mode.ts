@@ -675,14 +675,6 @@ export class InteractiveMode {
 		this.sidebarComponent.setHeight(measurement.topHeight);
 	}
 
-	private getTranscriptPaneWidth(totalWidth = this.ui.terminal.columns): number {
-		const sidebarWidth =
-			this.sidebarVisible && totalWidth >= InteractiveMode.SIDEBAR_MIN_TERMINAL_WIDTH
-				? InteractiveMode.SIDEBAR_WIDTH
-				: 0;
-		return Math.max(1, totalWidth - sidebarWidth);
-	}
-
 	private setTranscriptScrollOffset(offset: number): void {
 		this.transcriptScrollOffset = Math.max(0, Math.min(offset, this.transcriptViewport.getMaxScrollOffset()));
 		this.transcriptViewport.setScrollOffset(this.transcriptScrollOffset);
@@ -729,66 +721,28 @@ export class InteractiveMode {
 			return { consume: true };
 		}
 
-		const wheelEvent = this.getTranscriptWheelEvent(data);
-		if (wheelEvent && this.isTranscriptWheelTarget(wheelEvent.col, wheelEvent.row)) {
-			if (wheelEvent.direction === "up") {
-				this.scrollTranscriptBy(3);
-				return { consume: true };
-			}
-			if (wheelEvent.direction === "down") {
-				this.scrollTranscriptBy(-3);
-				return { consume: true };
-			}
+		// Trackpad/wheel scroll: route to transcript regardless of pointer position.
+		// Non-wheel button events (clicks) return undefined so the editor receives them.
+		const wheelDirection = this.getWheelDirection(data);
+		if (wheelDirection !== undefined) {
+			this.scrollTranscriptBy(wheelDirection === "up" ? 1 : -1);
+			return { consume: true };
 		}
 
 		return undefined;
 	}
 
-	private isTranscriptWheelTarget(col: number, row: number): boolean {
-		if (col < 1 || row < 1) {
-			return false;
-		}
-
-		return row <= this.transcriptViewport.getHeight() && col <= this.getTranscriptPaneWidth();
-	}
-
-	private getTranscriptWheelEvent(data: string): { direction: "up" | "down"; col: number; row: number } | undefined {
-		const sgrMouse = data.match(/^\x1b\[<(\d+);(\d+);(\d+)[Mm]$/);
-		if (sgrMouse) {
-			const direction = this.getWheelDirectionFromButtonCode(Number(sgrMouse[1]));
-			if (!direction) {
-				return undefined;
-			}
-			return {
-				direction,
-				col: Number(sgrMouse[2]),
-				row: Number(sgrMouse[3]),
-			};
-		}
-
-		const legacyMouse = data.match(/^\x1b\[M([\x00-\xff])([\x00-\xff])([\x00-\xff])$/);
-		if (legacyMouse) {
-			const direction = this.getWheelDirectionFromButtonCode(legacyMouse[1].charCodeAt(0) - 32);
-			if (!direction) {
-				return undefined;
-			}
-			return {
-				direction,
-				col: legacyMouse[2].charCodeAt(0) - 32,
-				row: legacyMouse[3].charCodeAt(0) - 32,
-			};
-		}
-
+	private getWheelDirection(data: string): "up" | "down" | undefined {
+		const sgr = data.match(/^\x1b\[<(\d+);(\d+);(\d+)[Mm]$/);
+		if (sgr) return this.wheelButtonToDirection(Number(sgr[1]));
+		const legacy = data.match(/^\x1b\[M([\x00-\xff])([\x00-\xff])([\x00-\xff])$/);
+		if (legacy) return this.wheelButtonToDirection(legacy[1].charCodeAt(0) - 32);
 		return undefined;
 	}
 
-	private getWheelDirectionFromButtonCode(button: number): "up" | "down" | undefined {
-		// xterm mouse encodes wheel events as button codes with bit 6 set.
-		// Modifier bits may also be present, so we mask to the low two button bits.
-		if ((button & 64) === 0) {
-			return undefined;
-		}
-
+	private wheelButtonToDirection(button: number): "up" | "down" | undefined {
+		// Bit 6 set = wheel event; low bit: 0 = up, 1 = down.
+		if ((button & 64) === 0) return undefined;
 		return (button & 1) === 0 ? "up" : "down";
 	}
 

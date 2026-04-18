@@ -84,9 +84,9 @@ export class ProcessTerminal implements Terminal {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
 
-		// Switch to alternate screen buffer. This eliminates terminal scrollback competition
-		// so that trackpad scroll events are forwarded to the app (via mouse tracking) rather
-		// than scrolling the terminal's own history. On exit, the previous shell screen is restored.
+		// Switch to alternate screen buffer so trackpad/wheel scroll is delivered to the app
+		// via SGR mouse tracking instead of scrolling terminal history (which would show
+		// stale frames from the fixed-height Viewport layout).
 		process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
 
 		// Save previous state and enable raw mode
@@ -100,12 +100,12 @@ export class ProcessTerminal implements Terminal {
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
 
-		// Enable SGR mouse reporting for the alternate screen so wheel/trackpad input is delivered
-		// to the app explicitly instead of falling back to terminal-controlled alternate scrolling.
-		//
-		// We use normal tracking (1000), which still reports wheel/button events in the alternate
-		// screen but avoids the broader drag-capture behavior of button-event/all-motion modes.
-		process.stdout.write("\x1b[?1007l\x1b[?1000h\x1b[?1006h");
+		// Enable SGR mouse wheel tracking so trackpad/scroll events reach the app.
+		// Mode 1000 = button events (includes wheel); 1006 = SGR coordinate encoding.
+		// Clear 1002/1003/1007 first to avoid stale motion or alternate-scroll modes.
+		// Text selection: hold Shift while dragging — terminals bypass mouse capture for
+		// Shift+click, restoring native selection (standard UX in vim, tmux, less, etc.).
+		process.stdout.write("\x1b[?1002l\x1b[?1003l\x1b[?1007l\x1b[?1006h\x1b[?1000h");
 
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
@@ -276,10 +276,8 @@ export class ProcessTerminal implements Terminal {
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
 
-		// Disable mouse reporting modes.
-		process.stdout.write("\x1b[?1000l\x1b[?1006l\x1b[?1007l");
-
-		// Restore main screen buffer (shows shell as it was before piper started)
+		// Disable mouse tracking and restore main screen buffer
+		process.stdout.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1007l");
 		process.stdout.write("\x1b[?1049l");
 
 		// Disable Kitty keyboard protocol if not already done by drainInput()

@@ -170,6 +170,20 @@ describe("interactive shell layout primitives", () => {
 		expect(rendered).toContain("12%");
 		expect(rendered).toContain("123k / 1.0M");
 	});
+
+	it("skips malformed sidebar sections instead of crashing", () => {
+		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
+		sidebar.setHeight(18);
+		sidebar.setResourceSections([
+			{ label: "Skills", value: "review, write" },
+			{ label: "Broken", value: undefined as unknown as string },
+			{ label: undefined as unknown as string, value: "oops" },
+		]);
+
+		const rendered = sidebar.render(30).join("\n");
+		expect(rendered).toContain("Skills");
+		expect(rendered).not.toContain("Broken");
+	});
 });
 
 describe("interactive shell routing", () => {
@@ -235,66 +249,52 @@ describe("interactive shell routing", () => {
 		expect(fakeThis.transcriptScrollOffset).toBe(25);
 	});
 
-	it("routes transcript keyboard and mouse input without touching the editor", () => {
+	it("routes transcript keyboard and wheel input; non-wheel clicks pass through", () => {
 		const editor = { handleInput: vi.fn() };
 		const fakeThis: any = {
 			keybindings: {
 				matches: vi.fn((data: string, key: string) => data === "KEY_PAGE_UP" && key === "app.transcript.pageUp"),
 			},
 			editor,
-			sidebarVisible: true,
-			ui: {
-				terminal: {
-					columns: 120,
-				},
-			},
-			transcriptViewport: {
-				getHeight: () => 12,
-			},
 			scrollTranscriptBy: vi.fn(),
 			scrollTranscriptPage: vi.fn(),
 			scrollTranscriptToBoundary: vi.fn(),
-			getTranscriptPaneWidth: (InteractiveMode as any).prototype.getTranscriptPaneWidth,
-			isTranscriptWheelTarget: (InteractiveMode as any).prototype.isTranscriptWheelTarget,
-			getTranscriptWheelEvent: (InteractiveMode as any).prototype.getTranscriptWheelEvent,
-			getWheelDirectionFromButtonCode: (InteractiveMode as any).prototype.getWheelDirectionFromButtonCode,
+			getWheelDirection: (InteractiveMode as any).prototype.getWheelDirection,
+			wheelButtonToDirection: (InteractiveMode as any).prototype.wheelButtonToDirection,
 		};
 
-		const keyboardResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "KEY_PAGE_UP");
-		expect(keyboardResult).toEqual({ consume: true });
+		// Keyboard page-up → consumed
+		const keyResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "KEY_PAGE_UP");
+		expect(keyResult).toEqual({ consume: true });
 		expect(fakeThis.scrollTranscriptPage).toHaveBeenCalledWith("up");
-		expect(editor.handleInput).not.toHaveBeenCalled();
 
-		const mouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<64;10;5M");
-		expect(mouseResult).toEqual({ consume: true });
-		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(3);
-		expect(editor.handleInput).not.toHaveBeenCalled();
+		// SGR wheel up (button 64) anywhere → scroll transcript up by 1
+		const wheelUp = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<64;10;5M");
+		expect(wheelUp).toEqual({ consume: true });
+		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(1);
 
-		const sidebarMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
-			fakeThis,
-			"\x1b[<64;95;5M",
-		);
-		expect(sidebarMouseResult).toBeUndefined();
+		// SGR wheel down (button 65) → scroll transcript down by 1
+		const wheelDown = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<65;10;5M");
+		expect(wheelDown).toEqual({ consume: true });
+		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(-1);
 
-		const dockMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
-			fakeThis,
-			"\x1b[<64;10;20M",
-		);
-		expect(dockMouseResult).toBeUndefined();
+		// Wheel with Shift modifier (button 68 = 64|4) → still a scroll event
+		const modWheel = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<68;10;5M");
+		expect(modWheel).toEqual({ consume: true });
 
-		const modifiedMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
-			fakeThis,
-			"\x1b[<68;10;5M",
-		);
-		expect(modifiedMouseResult).toEqual({ consume: true });
-		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(3);
-
-		const legacyMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
+		// Legacy X10 wheel scroll down → consumed
+		const legacy = (InteractiveMode as any).prototype.handleTranscriptInput.call(
 			fakeThis,
 			`\x1b[M${String.fromCharCode(32 + 65)}!!`,
 		);
-		expect(legacyMouseResult).toEqual({ consume: true });
-		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(-3);
+		expect(legacy).toEqual({ consume: true });
+
+		// Regular left-click (button 0) → NOT consumed, passes to editor
+		const click = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<0;10;5M");
+		expect(click).toBeUndefined();
+
+		// Ordinary character → not consumed
+		expect((InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "a")).toBeUndefined();
 	});
 
 	it("merges keyed sidebar contributions in deterministic order", () => {
