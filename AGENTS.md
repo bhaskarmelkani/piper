@@ -1,5 +1,31 @@
 # Development Rules
 
+## Pico Context
+
+- This repo is evolving pi into `pico`, a polished terminal app built on pi.
+- Do not treat BetterCode as the source repo to preserve or migrate.
+- Use BetterCode only as a source of UX taste and terminal interaction learnings.
+- The main product work is in `packages/coding-agent`, not a runtime rewrite.
+- Prefer polishing pi's existing TUI and workflows over adding OpenCode-style complexity.
+- `pico` should keep pi's engine, sessions, extensions, themes, and core compatibility where practical.
+- Carry over these product choices into `pico`:
+  - transcript-first shell
+  - composer docked to the bottom
+  - visible model and thinking state
+  - calmer transcript hierarchy
+  - better prompt/question/approval ergonomics
+  - contextual right sidebar
+  - strong streaming, scroll, and resize stability
+- Prefer `clack` for transient guided interactions like selectors, confirms, settings, and login/provider flows.
+- Do not use `clack` to replace the main transcript, streaming output, docked editor, or arbitrary extension custom UI.
+- Primary implementation plan: `plans/v000/README.md`
+- Keep `plans/v000/README.md` updated as the execution tracker using milestone TODO format:
+  - `[ ]` not started
+  - `[~]` in progress
+  - `[x]` done
+  - `[!]` blocked
+- Execute one milestone at a time. Do not start the next milestone until the current one is stable and validated.
+
 ## Conversational Style
 
 - Keep answers short and concise

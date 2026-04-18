@@ -9,6 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@mariozechner/pi-ai";
+import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import type {
 	AutocompleteItem,
 	EditorComponent,
@@ -24,7 +25,9 @@ import {
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
+	clack,
 	fuzzyFilter,
+	HorizontalSplit,
 	Loader,
 	Markdown,
 	matchesKey,
@@ -35,6 +38,7 @@ import {
 	TruncatedText,
 	TUI,
 	visibleWidth,
+	withClackFlow,
 } from "@mariozechner/pi-tui";
 import { spawn, spawnSync } from "child_process";
 import {
@@ -91,10 +95,10 @@ import { FooterComponent } from "./components/footer.js";
 import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
-import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
+import { ShellSidebarComponent } from "./components/shell-sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
@@ -290,6 +294,17 @@ export class InteractiveMode {
 	// Custom header from extension (undefined = use built-in header)
 	private customHeader: (Component & { dispose?(): void }) | undefined = undefined;
 
+	// Shell layout: wraps mainContainer + sidebar in a horizontal split
+	private mainContainer: Container;
+	private shellLayout: HorizontalSplit;
+	private sidebarComponent: ShellSidebarComponent;
+
+	// Sidebar visibility state (actual display also depends on terminal width)
+	private sidebarVisible = true;
+
+	private static readonly SIDEBAR_WIDTH = 30;
+	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
+
 	// Convenience accessors
 	private get session(): AgentSession {
 		return this.runtimeHost.session;
@@ -318,6 +333,14 @@ export class InteractiveMode {
 		this.statusContainer = new Container();
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
+		this.mainContainer = new Container();
+		this.sidebarComponent = new ShellSidebarComponent(this.runtimeHost.session);
+		this.shellLayout = new HorizontalSplit(
+			this.mainContainer,
+			this.sidebarComponent,
+			InteractiveMode.SIDEBAR_WIDTH,
+			(width) => this.sidebarVisible && width >= InteractiveMode.SIDEBAR_MIN_TERMINAL_WIDTH,
+		);
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -517,8 +540,12 @@ export class InteractiveMode {
 		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
 		this.fdPath = fdPath;
 
-		// Add header container as first child
-		this.ui.addChild(this.headerContainer);
+		// Add shell layout as the single top-level child of the TUI.
+		// All content goes into mainContainer; sidebarComponent sits alongside it.
+		this.ui.addChild(this.shellLayout);
+
+		// Add header container as first child of the main layout
+		this.mainContainer.addChild(this.headerContainer);
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
@@ -539,6 +566,7 @@ export class InteractiveMode {
 				hint("app.model.select", "to select model"),
 				hint("app.tools.expand", "to expand tools"),
 				hint("app.thinking.toggle", "to expand thinking"),
+				hint("app.sidebar.toggle", "to toggle sidebar"),
 				hint("app.editor.external", "for external editor"),
 				rawKeyHint("/", "for commands"),
 				rawKeyHint("!", "to run bash"),
@@ -581,14 +609,14 @@ export class InteractiveMode {
 			this.headerContainer.addChild(this.builtInHeader);
 		}
 
-		this.ui.addChild(this.chatContainer);
-		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.statusContainer);
+		this.mainContainer.addChild(this.chatContainer);
+		this.mainContainer.addChild(this.pendingMessagesContainer);
+		this.mainContainer.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
-		this.ui.addChild(this.widgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.widgetContainerBelow);
-		this.ui.addChild(this.footer);
+		this.mainContainer.addChild(this.widgetContainerAbove);
+		this.mainContainer.addChild(this.editorContainer);
+		this.mainContainer.addChild(this.widgetContainerBelow);
+		this.mainContainer.addChild(this.footer);
 		this.ui.setFocus(this.editor);
 
 		this.setupKeyHandlers();
@@ -1779,21 +1807,21 @@ export class InteractiveMode {
 			this.customFooter.dispose();
 		}
 
-		// Remove current footer from UI
+		// Remove current footer from main container
 		if (this.customFooter) {
-			this.ui.removeChild(this.customFooter);
+			this.mainContainer.removeChild(this.customFooter);
 		} else {
-			this.ui.removeChild(this.footer);
+			this.mainContainer.removeChild(this.footer);
 		}
 
 		if (factory) {
 			// Create and add custom footer, passing the data provider
 			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
-			this.ui.addChild(this.customFooter);
+			this.mainContainer.addChild(this.customFooter);
 		} else {
 			// Restore built-in footer
 			this.customFooter = undefined;
-			this.ui.addChild(this.footer);
+			this.mainContainer.addChild(this.footer);
 		}
 
 		this.ui.requestRender();
@@ -2328,6 +2356,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.sidebar.toggle", () => this.toggleSidebar());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -3301,6 +3330,11 @@ export class InteractiveMode {
 		this.setToolsExpanded(!this.toolOutputExpanded);
 	}
 
+	private toggleSidebar(): void {
+		this.sidebarVisible = !this.sidebarVisible;
+		this.ui.requestRender(true);
+	}
+
 	private setToolsExpanded(expanded: boolean): void {
 		this.toolOutputExpanded = expanded;
 		const activeHeader = this.customHeader ?? this.builtInHeader;
@@ -4212,39 +4246,45 @@ export class InteractiveMode {
 			}
 		}
 
-		this.showSelector((done) => {
-			const selector = new OAuthSelectorComponent(
-				mode,
-				this.session.modelRegistry.authStorage,
-				async (providerId: string) => {
-					done();
+		const allProviders = getOAuthProviders();
+		if (allProviders.length === 0) {
+			this.showStatus("No OAuth providers available.");
+			return;
+		}
 
-					if (mode === "login") {
-						await this.showLoginDialog(providerId);
-					} else {
-						// Logout flow
-						const providerInfo = this.session.modelRegistry.authStorage
-							.getOAuthProviders()
-							.find((p) => p.id === providerId);
-						const providerName = providerInfo?.name || providerId;
-
-						try {
-							this.session.modelRegistry.authStorage.logout(providerId);
-							this.session.modelRegistry.refresh();
-							await this.updateAvailableProviderCount();
-							this.showStatus(`Logged out of ${providerName}`);
-						} catch (error: unknown) {
-							this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
-						}
-					}
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-			);
-			return { component: selector, focus: selector };
+		const options = allProviders.map((p) => {
+			const credentials = this.session.modelRegistry.authStorage.get(p.id);
+			const isLoggedIn = credentials?.type === "oauth";
+			return { value: p.id as string, label: p.name, hint: isLoggedIn ? "logged in" : undefined };
 		});
+
+		const selectedId = await withClackFlow(this.ui, async () => {
+			const result = await clack.select({
+				message: mode === "login" ? "Select provider to login:" : "Select provider to logout:",
+				options,
+			});
+			return clack.isCancel(result) ? undefined : (result as string);
+		});
+
+		if (!selectedId) return;
+
+		if (mode === "login") {
+			await this.showLoginDialog(selectedId);
+		} else {
+			const providerInfo = this.session.modelRegistry.authStorage
+				.getOAuthProviders()
+				.find((p) => p.id === selectedId);
+			const providerName = providerInfo?.name || selectedId;
+
+			try {
+				this.session.modelRegistry.authStorage.logout(selectedId as OAuthProviderId);
+				this.session.modelRegistry.refresh();
+				await this.updateAvailableProviderCount();
+				this.showStatus(`Logged out of ${providerName}`);
+			} catch (error: unknown) {
+				this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 	}
 
 	private async showLoginDialog(providerId: string): Promise<void> {

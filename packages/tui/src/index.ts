@@ -12,6 +12,8 @@ export {
 export { Box } from "./components/box.js";
 export { CancellableLoader } from "./components/cancellable-loader.js";
 export { Editor, type EditorOptions, type EditorTheme } from "./components/editor.js";
+// Horizontal split layout
+export { HorizontalSplit } from "./components/horizontal-split.js";
 export { Image, type ImageOptions, type ImageTheme } from "./components/image.js";
 export { Input } from "./components/input.js";
 export { Loader } from "./components/loader.js";
@@ -57,6 +59,9 @@ export {
 	parseKey,
 	setKittyProtocolActive,
 } from "./keys.js";
+// Clack prompts integration (re-exports @clack/prompts + withClackFlow)
+export * as clack from "./prompts/index.js";
+export { withClackFlow } from "./prompts/index.js";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.js";
 // Terminal interface and implementations

@@ -84,6 +84,11 @@ export class ProcessTerminal implements Terminal {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
 
+		// Clear screen and move cursor to top so pico starts clean without
+		// previous shell output visible. Uses the main buffer (not alternate screen)
+		// so the terminal's scrollback history is preserved and chat can scroll naturally.
+		process.stdout.write("\x1b[2J\x1b[H");
+
 		// Save previous state and enable raw mode
 		this.wasRaw = process.stdin.isRaw || false;
 		if (process.stdin.setRawMode) {

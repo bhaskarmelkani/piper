@@ -188,8 +188,9 @@ export const APP_NAME: string = pkg.piConfig?.name || "pi";
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
 export const VERSION: string = pkg.version;
 
-// e.g., PI_CODING_AGENT_DIR or TAU_CODING_AGENT_DIR
-export const ENV_AGENT_DIR = `${APP_NAME.toUpperCase()}_CODING_AGENT_DIR`;
+// Keep PI_ prefix for backward compatibility during staged rebrand to pico.
+// Users who set PI_CODING_AGENT_DIR in their environment will continue to work.
+export const ENV_AGENT_DIR = "PI_CODING_AGENT_DIR";
 
 const DEFAULT_SHARE_VIEWER_URL = "https://pi.dev/session/";
 

@@ -39,6 +39,7 @@ export interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
+	"app.sidebar.toggle": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -133,6 +134,10 @@ export const KEYBINDINGS = {
 	"app.session.deleteNoninvasive": {
 		defaultKeys: "ctrl+backspace",
 		description: "Delete session when query is empty",
+	},
+	"app.sidebar.toggle": {
+		defaultKeys: "ctrl+\\",
+		description: "Toggle sidebar visibility",
 	},
 } as const satisfies KeybindingDefinitions;
 
@@ -302,4 +307,4 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	}
 }
 
-export type { Keybinding, KeyId, KeybindingsConfig };
+export type { Keybinding, KeybindingsConfig, KeyId };
