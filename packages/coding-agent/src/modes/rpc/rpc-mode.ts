@@ -284,7 +284,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// Tool expansion not supported in RPC mode - no TUI
 		},
 
-		setSidebarSections(_sections) {
+		setSidebarSections(_keyOrSections?, _sections?, _options?) {
 			// Sidebar not available in RPC mode
 		},
 	});

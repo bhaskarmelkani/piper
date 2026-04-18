@@ -16,35 +16,18 @@ function sanitizeStatusText(text: string): string {
 }
 
 /**
- * Format token counts (similar to web-ui)
- */
-function formatTokens(count: number): string {
-	if (count < 1000) return count.toString();
-	if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
-	if (count < 1000000) return `${Math.round(count / 1000)}k`;
-	if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
-	return `${Math.round(count / 1000000)}M`;
-}
-
-/**
- * Footer component that shows pwd, token stats, and context usage.
- * Computes token/context stats from session, gets git branch and extension statuses from provider.
+ * Footer component that only renders extension-owned status text.
+ * Session metadata now lives in the right sidebar to avoid duplication.
  */
 export class FooterComponent implements Component {
-	private autoCompactEnabled = true;
-
 	constructor(
-		private session: AgentSession,
+		_session: AgentSession,
 		private footerData: ReadonlyFooterDataProvider,
 	) {}
 
-	setSession(session: AgentSession): void {
-		this.session = session;
-	}
+	setSession(_session: AgentSession): void {}
 
-	setAutoCompactEnabled(enabled: boolean): void {
-		this.autoCompactEnabled = enabled;
-	}
+	setAutoCompactEnabled(_enabled: boolean): void {}
 
 	/**
 	 * No-op: git branch caching now handled by provider.
@@ -67,93 +50,21 @@ export class FooterComponent implements Component {
 	}
 
 	private renderFooter(width: number): string[] {
-		const state = this.session.state;
-
-		// Calculate cumulative usage from ALL session entries (not just post-compaction messages)
-		let totalInput = 0;
-		let totalOutput = 0;
-		let totalCacheRead = 0;
-		let totalCacheWrite = 0;
-		let totalCost = 0;
-
-		for (const entry of this.session.sessionManager.getEntries()) {
-			if (entry.type === "message" && entry.message.role === "assistant") {
-				totalInput += entry.message.usage.input;
-				totalOutput += entry.message.usage.output;
-				totalCacheRead += entry.message.usage.cacheRead;
-				totalCacheWrite += entry.message.usage.cacheWrite;
-				totalCost += entry.message.usage.cost.total;
-			}
-		}
-
-		// Calculate context usage from session (handles compaction correctly).
-		// After compaction, tokens are unknown until the next LLM response.
-		const contextUsage = this.session.getContextUsage();
-		const contextWindow = contextUsage?.contextWindow ?? state.model?.contextWindow ?? 0;
-		const contextPercentValue = contextUsage?.percent ?? 0;
-		const contextPercent = contextUsage?.percent !== null ? contextPercentValue.toFixed(1) : "?";
-
-		// Replace home directory with ~
-		let pwd = this.session.sessionManager.getCwd();
-		const home = process.env.HOME || process.env.USERPROFILE;
-		if (home && pwd.startsWith(home)) {
-			pwd = `~${pwd.slice(home.length)}`;
-		}
-
-		// Add git branch if available
-		const branch = this.footerData.getGitBranch();
-		if (branch) {
-			pwd = `${pwd} (${branch})`;
-		}
-
-		// Add session name if set
-		const sessionName = this.session.sessionManager.getSessionName();
-		if (sessionName) {
-			pwd = `${pwd} • ${sessionName}`;
-		}
-
-		// Build styled stat segments individually
-		const m = (s: string) => theme.fg("muted", s);
-
-		const seg: string[] = [];
-		if (totalInput) seg.push(m(`↑${formatTokens(totalInput)}`));
-		if (totalOutput) seg.push(m(`↓${formatTokens(totalOutput)}`));
-		if (totalCacheRead) seg.push(m(`R${formatTokens(totalCacheRead)}`));
-		if (totalCacheWrite) seg.push(m(`W${formatTokens(totalCacheWrite)}`));
-
-		const usingSubscription = state.model ? this.session.modelRegistry.isUsingOAuth(state.model) : false;
-		if (totalCost || usingSubscription) {
-			seg.push(m(`$${totalCost.toFixed(3)}${usingSubscription ? " (sub)" : ""}`));
-		}
-
-		// Context percentage: colored when approaching limits, plain muted otherwise
-		const autoIndicator = this.autoCompactEnabled ? " (auto)" : "";
-		const contextPercentDisplay =
-			contextPercent === "?"
-				? `?/${formatTokens(contextWindow)}${autoIndicator}`
-				: `${contextPercent}%/${formatTokens(contextWindow)}${autoIndicator}`;
-		if (contextPercentValue > 90) {
-			seg.push(theme.fg("error", contextPercentDisplay));
-		} else if (contextPercentValue > 70) {
-			seg.push(theme.fg("warning", contextPercentDisplay));
-		} else {
-			seg.push(m(contextPercentDisplay));
-		}
-
-		if (this.footerData.getAvailableProviderCount() > 1 && state.model) {
-			seg.push(m(`provider:${state.model.provider}`));
-		}
-
 		// Extension statuses
 		const extensionStatuses = this.footerData.getExtensionStatuses();
-		if (extensionStatuses.size > 0) {
-			const sorted = Array.from(extensionStatuses.entries())
-				.sort(([a], [b]) => a.localeCompare(b))
-				.map(([, text]) => sanitizeStatusText(text));
-			seg.push(m(`· ${sorted.join(" ")}`));
+		if (extensionStatuses.size === 0) {
+			return [];
 		}
 
-		const combined = m(pwd) + m("  ") + seg.join(m(" "));
-		return [truncateToWidth(combined, width, m("..."))];
+		const sorted = Array.from(extensionStatuses.entries())
+			.sort(([a], [b]) => a.localeCompare(b))
+			.map(([, text]) => sanitizeStatusText(text))
+			.filter(Boolean);
+		if (sorted.length === 0) {
+			return [];
+		}
+
+		const muted = (text: string) => theme.fg("muted", text);
+		return [truncateToWidth(muted(sorted.join(" · ")), width, muted("..."))];
 	}
 }

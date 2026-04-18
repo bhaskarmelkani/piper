@@ -50,7 +50,8 @@ export class HorizontalSplit implements Component {
 			const rightLine = rightLines[i] ?? "";
 			// Pad left line to exactly leftWidth, preserving ANSI codes and CURSOR_MARKER
 			const leftPadded = truncateToWidth(leftLine, leftWidth, "", true);
-			result.push(leftPadded + rightLine);
+			const rightPadded = truncateToWidth(rightLine, this.rightWidth, "", true);
+			result.push(leftPadded + rightPadded);
 		}
 
 		return result;

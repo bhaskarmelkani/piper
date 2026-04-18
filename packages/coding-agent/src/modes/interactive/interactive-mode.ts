@@ -56,6 +56,8 @@ import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../
 import type {
 	ExtensionContext,
 	ExtensionRunner,
+	ExtensionSidebarOptions,
+	ExtensionSidebarSection,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
@@ -151,6 +153,13 @@ class ExpandableText extends Text implements Expandable {
 type CompactionQueuedMessage = {
 	text: string;
 	mode: "steer" | "followUp";
+};
+
+type SidebarContribution = {
+	key: string;
+	sections: ExtensionSidebarSection[];
+	order: number;
+	sequence: number;
 };
 
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
@@ -311,13 +320,15 @@ export class InteractiveMode {
 
 	// Sidebar visibility state (actual display also depends on terminal width)
 	private sidebarVisible = true;
-	private extensionSidebarSections: Array<{ label: string; value: string }> | undefined = undefined;
-	private lastBuiltinSidebarSections: Array<{ label: string; value: string }> = [];
+	private sidebarContributions = new Map<string, SidebarContribution>();
+	private sidebarContributionSequence = 0;
 
 	private static readonly SIDEBAR_WIDTH = 30;
 	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
 	private static readonly MIN_TRANSCRIPT_HEIGHT = 6;
 	private static readonly MAX_DOCK_HEIGHT_RATIO = 0.4;
+	private static readonly BUILTIN_SIDEBAR_KEY = "__builtin__";
+	private static readonly LEGACY_EXTENSION_SIDEBAR_KEY = "__legacy_extension__";
 
 	// Convenience accessors
 	private get session(): AgentSession {
@@ -664,6 +675,14 @@ export class InteractiveMode {
 		this.sidebarComponent.setHeight(measurement.topHeight);
 	}
 
+	private getTranscriptPaneWidth(totalWidth = this.ui.terminal.columns): number {
+		const sidebarWidth =
+			this.sidebarVisible && totalWidth >= InteractiveMode.SIDEBAR_MIN_TERMINAL_WIDTH
+				? InteractiveMode.SIDEBAR_WIDTH
+				: 0;
+		return Math.max(1, totalWidth - sidebarWidth);
+	}
+
 	private setTranscriptScrollOffset(offset: number): void {
 		this.transcriptScrollOffset = Math.max(0, Math.min(offset, this.transcriptViewport.getMaxScrollOffset()));
 		this.transcriptViewport.setScrollOffset(this.transcriptScrollOffset);
@@ -681,6 +700,127 @@ export class InteractiveMode {
 
 	private scrollTranscriptToBoundary(boundary: "top" | "bottom"): void {
 		this.setTranscriptScrollOffset(boundary === "top" ? this.transcriptViewport.getMaxScrollOffset() : 0);
+		this.ui.requestRender();
+	}
+
+	private handleTranscriptInput(data: string): { consume?: boolean } | undefined {
+		if (this.keybindings.matches(data, "app.transcript.scrollUp")) {
+			this.scrollTranscriptBy(1);
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.scrollDown")) {
+			this.scrollTranscriptBy(-1);
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.pageUp")) {
+			this.scrollTranscriptPage("up");
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.pageDown")) {
+			this.scrollTranscriptPage("down");
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.scrollTop")) {
+			this.scrollTranscriptToBoundary("top");
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.scrollBottom")) {
+			this.scrollTranscriptToBoundary("bottom");
+			return { consume: true };
+		}
+
+		const wheelEvent = this.getTranscriptWheelEvent(data);
+		if (wheelEvent && this.isTranscriptWheelTarget(wheelEvent.col, wheelEvent.row)) {
+			if (wheelEvent.direction === "up") {
+				this.scrollTranscriptBy(3);
+				return { consume: true };
+			}
+			if (wheelEvent.direction === "down") {
+				this.scrollTranscriptBy(-3);
+				return { consume: true };
+			}
+		}
+
+		return undefined;
+	}
+
+	private isTranscriptWheelTarget(col: number, row: number): boolean {
+		if (col < 1 || row < 1) {
+			return false;
+		}
+
+		return row <= this.transcriptViewport.getHeight() && col <= this.getTranscriptPaneWidth();
+	}
+
+	private getTranscriptWheelEvent(data: string): { direction: "up" | "down"; col: number; row: number } | undefined {
+		const sgrMouse = data.match(/^\x1b\[<(\d+);(\d+);(\d+)[Mm]$/);
+		if (sgrMouse) {
+			const direction = this.getWheelDirectionFromButtonCode(Number(sgrMouse[1]));
+			if (!direction) {
+				return undefined;
+			}
+			return {
+				direction,
+				col: Number(sgrMouse[2]),
+				row: Number(sgrMouse[3]),
+			};
+		}
+
+		const legacyMouse = data.match(/^\x1b\[M([\x00-\xff])([\x00-\xff])([\x00-\xff])$/);
+		if (legacyMouse) {
+			const direction = this.getWheelDirectionFromButtonCode(legacyMouse[1].charCodeAt(0) - 32);
+			if (!direction) {
+				return undefined;
+			}
+			return {
+				direction,
+				col: legacyMouse[2].charCodeAt(0) - 32,
+				row: legacyMouse[3].charCodeAt(0) - 32,
+			};
+		}
+
+		return undefined;
+	}
+
+	private getWheelDirectionFromButtonCode(button: number): "up" | "down" | undefined {
+		// xterm mouse encodes wheel events as button codes with bit 6 set.
+		// Modifier bits may also be present, so we mask to the low two button bits.
+		if ((button & 64) === 0) {
+			return undefined;
+		}
+
+		return (button & 1) === 0 ? "up" : "down";
+	}
+
+	private setSidebarSectionsForKey(
+		key: string,
+		sections: ExtensionSidebarSection[] | undefined,
+		options?: ExtensionSidebarOptions,
+	): void {
+		if (!sections || sections.length === 0) {
+			this.sidebarContributions.delete(key);
+			this.applySidebarContributions();
+			return;
+		}
+
+		const existing = this.sidebarContributions.get(key);
+		this.sidebarContributions.set(key, {
+			key,
+			sections,
+			order: options?.order ?? existing?.order ?? 100,
+			sequence: existing?.sequence ?? this.sidebarContributionSequence++,
+		});
+		this.applySidebarContributions();
+	}
+
+	private getFlattenedSidebarSections(): ExtensionSidebarSection[] {
+		return Array.from(this.sidebarContributions.values())
+			.sort((a, b) => a.order - b.order || a.sequence - b.sequence)
+			.flatMap((entry) => entry.sections);
+	}
+
+	private applySidebarContributions(): void {
+		this.sidebarComponent.setResourceSections(this.getFlattenedSidebarSections());
 		this.ui.requestRender();
 	}
 
@@ -1388,7 +1528,7 @@ export class InteractiveMode {
 			this.chatContainer.addChild(section);
 			this.chatContainer.addChild(new Spacer(1));
 		};
-		const sidebarSections: Array<{ label: string; value: string }> = [];
+		const sidebarSections: ExtensionSidebarSection[] = [];
 
 		const skillsResult = this.session.resourceLoader.getSkills();
 		const promptsResult = this.session.resourceLoader.getPrompts();
@@ -1548,10 +1688,7 @@ export class InteractiveMode {
 		}
 
 		if (updateSidebar) {
-			this.lastBuiltinSidebarSections = sidebarSections;
-			if (!this.extensionSidebarSections) {
-				this.sidebarComponent.setResourceSections(sidebarSections);
-			}
+			this.setSidebarSectionsForKey(InteractiveMode.BUILTIN_SIDEBAR_KEY, sidebarSections, { order: 100 });
 		}
 
 		if (showDiagnostics) {
@@ -2118,10 +2255,16 @@ export class InteractiveMode {
 			},
 			getToolsExpanded: () => this.toolOutputExpanded,
 			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
-			setSidebarSections: (sections) => {
-				this.extensionSidebarSections = sections;
-				this.sidebarComponent.setResourceSections(sections ?? this.lastBuiltinSidebarSections);
-				this.ui.requestRender();
+			setSidebarSections: (
+				keyOrSections: string | ExtensionSidebarSection[] | undefined,
+				sections?: ExtensionSidebarSection[] | undefined,
+				options?: ExtensionSidebarOptions,
+			) => {
+				if (typeof keyOrSections === "string") {
+					this.setSidebarSectionsForKey(keyOrSections, sections, options);
+					return;
+				}
+				this.setSidebarSectionsForKey(InteractiveMode.LEGACY_EXTENSION_SIDEBAR_KEY, keyOrSections, options);
 			},
 		};
 	}
@@ -2498,45 +2641,7 @@ export class InteractiveMode {
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
-		this.ui.addInputListener((data) => {
-			if (this.keybindings.matches(data, "app.transcript.scrollUp")) {
-				this.scrollTranscriptBy(1);
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "app.transcript.scrollDown")) {
-				this.scrollTranscriptBy(-1);
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "app.transcript.pageUp")) {
-				this.scrollTranscriptPage("up");
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "app.transcript.pageDown")) {
-				this.scrollTranscriptPage("down");
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "app.transcript.scrollTop")) {
-				this.scrollTranscriptToBoundary("top");
-				return { consume: true };
-			}
-			if (this.keybindings.matches(data, "app.transcript.scrollBottom")) {
-				this.scrollTranscriptToBoundary("bottom");
-				return { consume: true };
-			}
-			// SGR mouse events: consume all to prevent terminal scrollback interference.
-			// Scroll buttons (64=up, 65=down) scroll the transcript; other button events are silently consumed.
-			const sgrMouse = data.match(/^\x1b\[<(\d+);(\d+);(\d+)[Mm]$/);
-			if (sgrMouse) {
-				const button = Number(sgrMouse[1]);
-				if (button === 64) {
-					this.scrollTranscriptBy(3);
-				} else if (button === 65) {
-					this.scrollTranscriptBy(-3);
-				}
-				return { consume: true };
-			}
-			return undefined;
-		});
+		this.ui.addInputListener((data) => this.handleTranscriptInput(data));
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());

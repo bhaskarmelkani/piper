@@ -99,6 +99,17 @@ export interface ExtensionWidgetOptions {
 	placement?: WidgetPlacement;
 }
 
+export interface ExtensionSidebarSection {
+	label: string;
+	value: string;
+	color?: string;
+}
+
+export interface ExtensionSidebarOptions {
+	/** Lower values render earlier in the sidebar. Defaults to 100. */
+	order?: number;
+}
+
 /** Raw terminal input listener for extensions. */
 export type TerminalInputHandler = (data: string) => { consume?: boolean; data?: string } | undefined;
 
@@ -242,11 +253,21 @@ export interface ExtensionUIContext {
 	setToolsExpanded(expanded: boolean): void;
 
 	/**
-	 * Replace the sidebar's resource sections with custom content.
-	 * Pass undefined to restore the built-in sections (skills, prompts, etc.).
-	 * Sections are label/value pairs rendered in the right sidebar panel.
+	 * Replace or clear the sections for a single sidebar contributor.
+	 * Multiple contributors are merged deterministically by order, then registration time.
 	 */
-	setSidebarSections(sections: Array<{ label: string; value: string; color?: string }> | undefined): void;
+	setSidebarSections(
+		key: string,
+		sections: ExtensionSidebarSection[] | undefined,
+		options?: ExtensionSidebarOptions,
+	): void;
+
+	/**
+	 * Replace the sidebar's resource sections with custom content.
+	 * Pass undefined to clear the legacy contributor.
+	 * Deprecated: prefer the keyed overload above.
+	 */
+	setSidebarSections(sections: ExtensionSidebarSection[] | undefined): void;
 }
 
 // ============================================================================

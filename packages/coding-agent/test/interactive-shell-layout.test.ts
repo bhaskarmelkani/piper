@@ -1,7 +1,14 @@
 import { Container } from "@mariozechner/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { BottomDockLayout } from "../../tui/src/components/bottom-dock-layout.js";
+import { HorizontalSplit } from "../../tui/src/components/horizontal-split.js";
 import { Viewport } from "../../tui/src/components/viewport.js";
+import { visibleWidth } from "../../tui/src/utils.js";
+import {
+	buildCopilotSidebarSections,
+	discoverGitHubToken,
+	parseCopilotUsageResponse,
+} from "../examples/extensions/copilot-budget.js";
 import type { AgentSession } from "../src/core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.js";
 import { renderDiff } from "../src/modes/interactive/components/diff.js";
@@ -40,6 +47,13 @@ function createSession(): AgentSession {
 				{
 					type: "message",
 					message: {
+						role: "user",
+						content: [{ type: "text", text: "Investigate Copilot sidebar usage" }],
+					},
+				},
+				{
+					type: "message",
+					message: {
 						role: "assistant",
 						usage: {
 							input: 1234,
@@ -51,10 +65,10 @@ function createSession(): AgentSession {
 					},
 				},
 			],
-			getSessionName: () => "feat/v.0.0.0",
+			getSessionName: () => undefined,
 			getCwd: () => "/Users/test/project",
 		},
-		getContextUsage: () => ({ contextWindow: 1_000_000, percent: 12.3 }),
+		getContextUsage: () => ({ tokens: 123_000, contextWindow: 1_000_000, percent: 12.3 }),
 		modelRegistry: {
 			isUsingOAuth: () => false,
 		},
@@ -131,8 +145,30 @@ describe("interactive shell layout primitives", () => {
 		const rendered = sidebar.render(30).join("\n");
 		expect(sidebar.render(30)).toHaveLength(26);
 		expect(rendered).toContain("claude-sonnet-4.6");
+		expect(rendered).toContain("Investigate Copilot sidebar");
+		expect(rendered).toContain("Usage");
 		expect(rendered).toContain("main");
 		expect(rendered).toContain("Skills");
+	});
+
+	it("renders a continuous shell row across transcript and sidebar widths", () => {
+		const split = new HorizontalSplit(lineComponent("transcript"), lineComponent("sidebar"), 8);
+		const [line] = split.render(24);
+		expect(visibleWidth(line)).toBe(24);
+		expect(line).toContain("transcript");
+		expect(line).toContain("sidebar");
+	});
+
+	it("renders semantic thinking and context states in the sidebar", () => {
+		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
+		sidebar.setHeight(18);
+		const rendered = sidebar.render(30).join("\n");
+		expect(rendered).toContain("Thinking");
+		expect(rendered).toContain("medium");
+		expect(rendered).toContain("Context");
+		expect(rendered).toContain("█");
+		expect(rendered).toContain("12%");
+		expect(rendered).toContain("123k / 1.0M");
 	});
 });
 
@@ -199,16 +235,117 @@ describe("interactive shell routing", () => {
 		expect(fakeThis.transcriptScrollOffset).toBe(25);
 	});
 
-	it("pushes loaded resource summaries into the sidebar", () => {
+	it("routes transcript keyboard and mouse input without touching the editor", () => {
+		const editor = { handleInput: vi.fn() };
+		const fakeThis: any = {
+			keybindings: {
+				matches: vi.fn((data: string, key: string) => data === "KEY_PAGE_UP" && key === "app.transcript.pageUp"),
+			},
+			editor,
+			sidebarVisible: true,
+			ui: {
+				terminal: {
+					columns: 120,
+				},
+			},
+			transcriptViewport: {
+				getHeight: () => 12,
+			},
+			scrollTranscriptBy: vi.fn(),
+			scrollTranscriptPage: vi.fn(),
+			scrollTranscriptToBoundary: vi.fn(),
+			getTranscriptPaneWidth: (InteractiveMode as any).prototype.getTranscriptPaneWidth,
+			isTranscriptWheelTarget: (InteractiveMode as any).prototype.isTranscriptWheelTarget,
+			getTranscriptWheelEvent: (InteractiveMode as any).prototype.getTranscriptWheelEvent,
+			getWheelDirectionFromButtonCode: (InteractiveMode as any).prototype.getWheelDirectionFromButtonCode,
+		};
+
+		const keyboardResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "KEY_PAGE_UP");
+		expect(keyboardResult).toEqual({ consume: true });
+		expect(fakeThis.scrollTranscriptPage).toHaveBeenCalledWith("up");
+		expect(editor.handleInput).not.toHaveBeenCalled();
+
+		const mouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<64;10;5M");
+		expect(mouseResult).toEqual({ consume: true });
+		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(3);
+		expect(editor.handleInput).not.toHaveBeenCalled();
+
+		const sidebarMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
+			fakeThis,
+			"\x1b[<64;95;5M",
+		);
+		expect(sidebarMouseResult).toBeUndefined();
+
+		const dockMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
+			fakeThis,
+			"\x1b[<64;10;20M",
+		);
+		expect(dockMouseResult).toBeUndefined();
+
+		const modifiedMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
+			fakeThis,
+			"\x1b[<68;10;5M",
+		);
+		expect(modifiedMouseResult).toEqual({ consume: true });
+		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(3);
+
+		const legacyMouseResult = (InteractiveMode as any).prototype.handleTranscriptInput.call(
+			fakeThis,
+			`\x1b[M${String.fromCharCode(32 + 65)}!!`,
+		);
+		expect(legacyMouseResult).toEqual({ consume: true });
+		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(-3);
+	});
+
+	it("merges keyed sidebar contributions in deterministic order", () => {
 		const setResourceSections = vi.fn();
+		const fakeThis: any = {
+			sidebarContributions: new Map(),
+			sidebarContributionSequence: 0,
+			sidebarComponent: { setResourceSections },
+			ui: { requestRender: vi.fn() },
+			getFlattenedSidebarSections: (InteractiveMode as any).prototype.getFlattenedSidebarSections,
+			applySidebarContributions: (InteractiveMode as any).prototype.applySidebarContributions,
+			setSidebarSectionsForKey: (InteractiveMode as any).prototype.setSidebarSectionsForKey,
+		};
+
+		(InteractiveMode as any).prototype.setSidebarSectionsForKey.call(
+			fakeThis,
+			"builtin",
+			[{ label: "Skills", value: "review" }],
+			{ order: 100 },
+		);
+		(InteractiveMode as any).prototype.setSidebarSectionsForKey.call(
+			fakeThis,
+			"budget",
+			[{ label: "Copilot", value: "████ 25%" }],
+			{ order: 30 },
+		);
+		(InteractiveMode as any).prototype.setSidebarSectionsForKey.call(
+			fakeThis,
+			"vanity",
+			[{ label: "Status", value: "Session started" }],
+			{ order: 40 },
+		);
+
+		expect(setResourceSections).toHaveBeenLastCalledWith([
+			{ label: "Copilot", value: "████ 25%" },
+			{ label: "Status", value: "Session started" },
+			{ label: "Skills", value: "review" },
+		]);
+	});
+
+	it("pushes loaded resource summaries into the sidebar", () => {
+		const setSidebarSectionsForKey = vi.fn();
 		const fakeThis: any = {
 			options: { verbose: false },
 			settingsManager: { getQuietStartup: () => true },
 			toolOutputExpanded: false,
 			chatContainer: new Container(),
 			sidebarComponent: {
-				setResourceSections,
+				setResourceSections: vi.fn(),
 			},
+			setSidebarSectionsForKey,
 			session: {
 				promptTemplates: [{ name: "fix", filePath: "/tmp/prompts/fix.md" }],
 				extensionRunner: undefined,
@@ -240,12 +377,67 @@ describe("interactive shell routing", () => {
 
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, { force: false });
 
-		expect(setResourceSections).toHaveBeenCalledWith([
-			{ label: "Context", value: "AGENTS.md" },
-			{ label: "Skills", value: "review" },
-			{ label: "Prompts", value: "/fix" },
-			{ label: "Extensions", value: "foo.ts" },
+		expect(setSidebarSectionsForKey).toHaveBeenCalledWith(
+			"__builtin__",
+			[
+				{ label: "Context", value: "AGENTS.md" },
+				{ label: "Skills", value: "review" },
+				{ label: "Prompts", value: "/fix" },
+				{ label: "Extensions", value: "foo.ts" },
+			],
+			{ order: 100 },
+		);
+	});
+});
+
+describe("copilot budget sidebar helpers", () => {
+	it("parses paid Copilot quota responses", () => {
+		const parsed = parseCopilotUsageResponse({
+			quota_snapshots: {
+				premium_interactions: {
+					entitlement: 1000,
+					remaining: 750,
+					unlimited: false,
+					overage_count: 3,
+					overage_permitted: true,
+				},
+			},
+			quota_reset_date_utc: "2026-05-01T00:00:00.000Z",
+		});
+
+		expect(parsed).toEqual({
+			used: 250,
+			entitlement: 1000,
+			percent: 25,
+			unlimited: false,
+			overageCount: 3,
+			overagePermitted: true,
+			resetDate: "2026-05-01T00:00:00.000Z",
+			tier: "paid",
+		});
+	});
+
+	it("builds degraded sidebar output when usage sync is unavailable", () => {
+		expect(buildCopilotSidebarSections(null)).toEqual([
+			{ label: "Copilot Budget", value: "sync unavailable", color: "warning" },
 		]);
+	});
+
+	it("prefers env tokens before gh auth token fallback", async () => {
+		await expect(
+			discoverGitHubToken(
+				{ ...process.env, GITHUB_TOKEN: "env-token", GH_TOKEN: "gh-token" },
+				async () => "cli-token",
+			),
+		).resolves.toBe("env-token");
+
+		await expect(
+			discoverGitHubToken({ ...process.env, GITHUB_TOKEN: "", GH_TOKEN: "gh-token" }, async () => "cli-token"),
+		).resolves.toBe("gh-token");
+
+		await expect(
+			discoverGitHubToken({ ...process.env, GITHUB_TOKEN: "", GH_TOKEN: "" }, async () => "cli-token"),
+		).resolves.toBe("cli-token");
 	});
 });
 

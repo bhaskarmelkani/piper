@@ -5,11 +5,19 @@
 ### Changed
 
 - Changed pico interactive mode to use a fixed shell layout with a persistent bottom dock, a responsive right sidebar, and an independently scrollable transcript pane.
+- Changed sidebar extension sections to support keyed composition with deterministic ordering, so built-in resources and extension-provided sidebar content can coexist.
 
 ### Fixed
 
 - Fixed in-session selectors, prompts, and login/provider flows to render inside the bottom dock instead of pausing the TUI with a full-terminal Clack takeover.
 - Fixed interactive edit diff rendering to use the built-in renderer again instead of requiring external `delta`.
+- Fixed transcript wheel and trackpad scrolling in pico interactive mode by enabling explicit alternate-screen mouse reporting instead of letting wheel input fall through to the docked composer.
+- Fixed sidebar context signaling to use consistent semantic thresholds in both the right sidebar and footer.
+
+### Added
+
+- Added semantic sidebar rendering for thinking and context state, including level-aware thinking colors and a compact context progress bar.
+- Added `examples/extensions/copilot-budget.ts`, a keyed sidebar example extension that shows GitHub Copilot premium request usage.
 
 ## [0.67.68] - 2026-04-17
 

@@ -166,12 +166,12 @@ export default function (pi: ExtensionAPI) {
 			sections.push({ label: "Tip", value: insight.tip, color: "warning" });
 		}
 
-		ctx.ui.setSidebarSections(sections);
+		ctx.ui.setSidebarSections("vanity", sections, { order: 40 });
 	});
 
 	pi.on("session_start", (_event, ctx) => {
 		if (!ctx.hasUI) return;
-		ctx.ui.setSidebarSections([{ label: "Status", value: "Session started" }]);
+		ctx.ui.setSidebarSections("vanity", [{ label: "Status", value: "Session started" }], { order: 40 });
 	});
 
 	pi.registerCommand("vanity", {
