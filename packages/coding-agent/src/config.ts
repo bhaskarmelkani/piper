@@ -188,7 +188,7 @@ export const APP_NAME: string = pkg.piConfig?.name || "pi";
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
 export const VERSION: string = pkg.version;
 
-// Keep PI_ prefix for backward compatibility during staged rebrand to pico.
+// Keep PI_ prefix for backward compatibility during staged rebrand to piper.
 // Users who set PI_CODING_AGENT_DIR in their environment will continue to work.
 export const ENV_AGENT_DIR = "PI_CODING_AGENT_DIR";
 

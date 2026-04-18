@@ -8,6 +8,10 @@ export {
 	CombinedAutocompleteProvider,
 	type SlashCommand,
 } from "./autocomplete.js";
+export {
+	BottomDockLayout,
+	type BottomDockLayoutMeasurement,
+} from "./components/bottom-dock-layout.js";
 // Components
 export { Box } from "./components/box.js";
 export { CancellableLoader } from "./components/cancellable-loader.js";
@@ -29,6 +33,7 @@ export { type SettingItem, SettingsList, type SettingsListTheme } from "./compon
 export { Spacer } from "./components/spacer.js";
 export { Text } from "./components/text.js";
 export { TruncatedText } from "./components/truncated-text.js";
+export { Viewport, type ViewportAnchor } from "./components/viewport.js";
 // Editor component interface (for custom editors)
 export type { EditorComponent } from "./editor-component.js";
 // Fuzzy matching

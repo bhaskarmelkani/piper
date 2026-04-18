@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-process.title = "pico";
+process.title = "piper";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 await import("./register-bedrock.js");

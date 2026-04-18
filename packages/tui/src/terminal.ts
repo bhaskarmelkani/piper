@@ -84,10 +84,10 @@ export class ProcessTerminal implements Terminal {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
 
-		// Clear screen and move cursor to top so pico starts clean without
-		// previous shell output visible. Uses the main buffer (not alternate screen)
-		// so the terminal's scrollback history is preserved and chat can scroll naturally.
-		process.stdout.write("\x1b[2J\x1b[H");
+		// Switch to alternate screen buffer. This eliminates terminal scrollback competition
+		// so that trackpad scroll events are forwarded to the app (via mouse tracking) rather
+		// than scrolling the terminal's own history. On exit, the previous shell screen is restored.
+		process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
 
 		// Save previous state and enable raw mode
 		this.wasRaw = process.stdin.isRaw || false;
@@ -99,6 +99,9 @@ export class ProcessTerminal implements Terminal {
 
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
+
+		// Enable SGR mouse button+scroll tracking (\x1b[?1000h = button events, \x1b[?1006h = SGR encoding)
+		process.stdout.write("\x1b[?1000h\x1b[?1006h");
 
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
@@ -268,6 +271,12 @@ export class ProcessTerminal implements Terminal {
 	stop(): void {
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
+
+		// Disable SGR mouse tracking
+		process.stdout.write("\x1b[?1000l\x1b[?1006l");
+
+		// Restore main screen buffer (shows shell as it was before piper started)
+		process.stdout.write("\x1b[?1049l");
 
 		// Disable Kitty keyboard protocol if not already done by drainInput()
 		if (this._kittyProtocolActive) {

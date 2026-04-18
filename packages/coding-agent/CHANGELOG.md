@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Changed pico interactive mode to use a fixed shell layout with a persistent bottom dock, a responsive right sidebar, and an independently scrollable transcript pane.
+
+### Fixed
+
+- Fixed in-session selectors, prompts, and login/provider flows to render inside the bottom dock instead of pausing the TUI with a full-terminal Clack takeover.
+- Fixed interactive edit diff rendering to use the built-in renderer again instead of requiring external `delta`.
+
 ## [0.67.68] - 2026-04-17
 
 ## [0.67.67] - 2026-04-17

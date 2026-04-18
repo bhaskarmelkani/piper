@@ -22,10 +22,11 @@ import type {
 	SlashCommand,
 } from "@mariozechner/pi-tui";
 import {
+	BottomDockLayout,
+	type BottomDockLayoutMeasurement,
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
-	clack,
 	fuzzyFilter,
 	HorizontalSplit,
 	Loader,
@@ -37,8 +38,8 @@ import {
 	Text,
 	TruncatedText,
 	TUI,
+	Viewport,
 	visibleWidth,
-	withClackFlow,
 } from "@mariozechner/pi-tui";
 import { spawn, spawnSync } from "child_process";
 import {
@@ -98,6 +99,7 @@ import { ModelSelectorComponent } from "./components/model-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
+import { ShellDockComponent } from "./components/shell-dock.js";
 import { ShellSidebarComponent } from "./components/shell-sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
@@ -199,9 +201,16 @@ export class InteractiveMode {
 	private editor: EditorComponent;
 	private autocompleteProvider: CombinedAutocompleteProvider | undefined;
 	private fdPath: string | undefined;
+	private transcriptContainer: Container;
+	private transcriptViewport: Viewport;
 	private editorContainer: Container;
+	private interactionContainer: Container;
+	private dockTransientContainer: Container;
+	private dockHints: Text;
 	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
+	private dockComponent: ShellDockComponent;
+	private rootLayout: BottomDockLayout;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
 	private version: string;
@@ -294,16 +303,18 @@ export class InteractiveMode {
 	// Custom header from extension (undefined = use built-in header)
 	private customHeader: (Component & { dispose?(): void }) | undefined = undefined;
 
-	// Shell layout: wraps mainContainer + sidebar in a horizontal split
-	private mainContainer: Container;
+	// Shell layout: transcript viewport on the left, persistent sidebar on the right, dock at the bottom
 	private shellLayout: HorizontalSplit;
 	private sidebarComponent: ShellSidebarComponent;
+	private transcriptScrollOffset = 0;
 
 	// Sidebar visibility state (actual display also depends on terminal width)
 	private sidebarVisible = true;
 
 	private static readonly SIDEBAR_WIDTH = 30;
 	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
+	private static readonly MIN_TRANSCRIPT_HEIGHT = 6;
+	private static readonly MAX_DOCK_HEIGHT_RATIO = 0.4;
 
 	// Convenience accessors
 	private get session(): AgentSession {
@@ -329,15 +340,18 @@ export class InteractiveMode {
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.chatContainer = new Container();
+		this.transcriptContainer = new Container();
+		this.transcriptViewport = new Viewport(this.transcriptContainer, { anchor: "bottom" });
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
-		this.mainContainer = new Container();
-		this.sidebarComponent = new ShellSidebarComponent(this.runtimeHost.session);
+		this.interactionContainer = new Container();
+		this.dockTransientContainer = new Container();
+		this.dockHints = new Text("", 0, 0);
 		this.shellLayout = new HorizontalSplit(
-			this.mainContainer,
-			this.sidebarComponent,
+			this.transcriptViewport,
+			null,
 			InteractiveMode.SIDEBAR_WIDTH,
 			(width) => this.sidebarVisible && width >= InteractiveMode.SIDEBAR_MIN_TERMINAL_WIDTH,
 		);
@@ -355,6 +369,22 @@ export class InteractiveMode {
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.sidebarComponent = new ShellSidebarComponent(this.runtimeHost.session, this.footerDataProvider);
+		this.shellLayout.setRight(this.sidebarComponent);
+		this.dockComponent = new ShellDockComponent(
+			this.dockHints,
+			this.dockTransientContainer,
+			this.editorContainer,
+			this.widgetContainerBelow,
+			this.footer,
+			() => this.getMaxDockHeight(),
+		);
+		this.rootLayout = new BottomDockLayout(
+			this.shellLayout,
+			this.dockComponent,
+			() => this.ui.terminal.rows,
+			(measurement) => this.handleRootLayoutMeasurement(measurement),
+		);
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -540,60 +570,23 @@ export class InteractiveMode {
 		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
 		this.fdPath = fdPath;
 
-		// Add shell layout as the single top-level child of the TUI.
-		// All content goes into mainContainer; sidebarComponent sits alongside it.
-		this.ui.addChild(this.shellLayout);
+		// Add fixed shell layout as the single top-level child of the TUI.
+		this.ui.addChild(this.rootLayout);
 
-		// Add header container as first child of the main layout
-		this.mainContainer.addChild(this.headerContainer);
+		// Add header container as the first child of the transcript layout.
+		this.transcriptContainer.addChild(this.headerContainer);
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
 			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
 
-			// Build startup instructions using keybinding hint helpers
-			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
-
-			const expandedInstructions = [
-				hint("app.interrupt", "to interrupt"),
-				hint("app.clear", "to clear"),
-				rawKeyHint(`${keyText("app.clear")} twice`, "to exit"),
-				hint("app.exit", "to exit (empty)"),
-				hint("app.suspend", "to suspend"),
-				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
-				hint("app.thinking.cycle", "to cycle thinking level"),
-				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
-				hint("app.model.select", "to select model"),
-				hint("app.tools.expand", "to expand tools"),
-				hint("app.thinking.toggle", "to expand thinking"),
-				hint("app.sidebar.toggle", "to toggle sidebar"),
-				hint("app.editor.external", "for external editor"),
-				rawKeyHint("/", "for commands"),
-				rawKeyHint("!", "to run bash"),
-				rawKeyHint("!!", "to run bash (no context)"),
-				hint("app.message.followUp", "to queue follow-up"),
-				hint("app.message.dequeue", "to edit all queued messages"),
-				hint("app.clipboard.pasteImage", "to paste image"),
-				rawKeyHint("drop files", "to attach"),
-			].join("\n");
-			const compactInstructions = [
-				hint("app.interrupt", "interrupt"),
-				rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
-				rawKeyHint("/", "commands"),
-				rawKeyHint("!", "bash"),
-				hint("app.tools.expand", "more"),
-			].join(theme.fg("muted", " · "));
-			const compactOnboarding = theme.fg(
-				"dim",
-				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
-			);
 			const onboarding = theme.fg(
 				"dim",
-				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
+				`piper can explain its own features and look up its docs. Ask it how to use or extend piper.`,
 			);
 			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
+				() => `${logo}\n${onboarding}`,
+				() => `${logo}\n${onboarding}`,
 				this.getStartupExpansionState(),
 				1,
 				0,
@@ -609,15 +602,14 @@ export class InteractiveMode {
 			this.headerContainer.addChild(this.builtInHeader);
 		}
 
-		this.mainContainer.addChild(this.chatContainer);
-		this.mainContainer.addChild(this.pendingMessagesContainer);
-		this.mainContainer.addChild(this.statusContainer);
+		this.transcriptContainer.addChild(this.chatContainer);
+		this.dockTransientContainer.addChild(this.pendingMessagesContainer);
+		this.dockTransientContainer.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
-		this.mainContainer.addChild(this.widgetContainerAbove);
-		this.mainContainer.addChild(this.editorContainer);
-		this.mainContainer.addChild(this.widgetContainerBelow);
-		this.mainContainer.addChild(this.footer);
+		this.dockTransientContainer.addChild(this.widgetContainerAbove);
+		this.dockTransientContainer.addChild(this.interactionContainer);
 		this.ui.setFocus(this.editor);
+		this.refreshDockHints();
 
 		this.setupKeyHandlers();
 		this.setupEditorSubmitHandler();
@@ -652,6 +644,68 @@ export class InteractiveMode {
 
 		// Initialize available provider count for footer display
 		await this.updateAvailableProviderCount();
+	}
+
+	private getMaxDockHeight(): number {
+		const terminalHeight = Math.max(1, this.ui.terminal.rows);
+		const maxByRatio = Math.max(4, Math.floor(terminalHeight * InteractiveMode.MAX_DOCK_HEIGHT_RATIO));
+		return Math.max(4, Math.min(maxByRatio, terminalHeight - InteractiveMode.MIN_TRANSCRIPT_HEIGHT));
+	}
+
+	private handleRootLayoutMeasurement(measurement: BottomDockLayoutMeasurement): void {
+		this.transcriptViewport.setHeight(measurement.topHeight);
+		this.transcriptViewport.setScrollOffset(this.transcriptScrollOffset);
+		this.sidebarComponent.setHeight(measurement.topHeight);
+	}
+
+	private setTranscriptScrollOffset(offset: number): void {
+		this.transcriptScrollOffset = Math.max(0, Math.min(offset, this.transcriptViewport.getMaxScrollOffset()));
+		this.transcriptViewport.setScrollOffset(this.transcriptScrollOffset);
+	}
+
+	private scrollTranscriptBy(lines: number): void {
+		this.setTranscriptScrollOffset(this.transcriptScrollOffset + lines);
+		this.ui.requestRender();
+	}
+
+	private scrollTranscriptPage(direction: "up" | "down"): void {
+		const pageSize = Math.max(1, this.transcriptViewport.getHeight() - 2);
+		this.scrollTranscriptBy(direction === "up" ? pageSize : -pageSize);
+	}
+
+	private scrollTranscriptToBoundary(boundary: "top" | "bottom"): void {
+		this.setTranscriptScrollOffset(boundary === "top" ? this.transcriptViewport.getMaxScrollOffset() : 0);
+		this.ui.requestRender();
+	}
+
+	private clearDockInteraction(): void {
+		this.interactionContainer.clear();
+	}
+
+	private showDockInteraction(component: Component, focus: Component): void {
+		this.interactionContainer.clear();
+		this.interactionContainer.addChild(component);
+		this.dockComponent.setHideEditor(true);
+		this.ui.setFocus(focus);
+		this.ui.requestRender();
+	}
+
+	private restoreComposerFocus(): void {
+		this.clearDockInteraction();
+		this.dockComponent.setHideEditor(false);
+		this.ui.setFocus(this.editor as Component);
+		this.ui.requestRender();
+	}
+
+	private refreshDockHints(): void {
+		const hints = [
+			keyHint("app.interrupt", "interrupt"),
+			rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
+			rawKeyHint("/", "commands"),
+			rawKeyHint("!", "bash"),
+			keyHint("app.tools.expand", "more"),
+		].join(theme.fg("muted", " · "));
+		this.dockHints.setText(theme.fg("dim", hints));
 	}
 
 	/**
@@ -1262,17 +1316,25 @@ export class InteractiveMode {
 	}): void {
 		const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
 		const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
-		if (!showListing && !showDiagnostics) {
+		const updateSidebar =
+			typeof this.sidebarComponent === "object" &&
+			this.sidebarComponent !== null &&
+			"setResourceSections" in this.sidebarComponent &&
+			typeof this.sidebarComponent.setResourceSections === "function";
+		if (!showListing && !showDiagnostics && !updateSidebar) {
 			return;
 		}
 
 		const sectionHeader = (name: string, color: ThemeColor = "mdHeading") => theme.fg(color, `[${name}]`);
-		const formatCompactList = (items: string[], options?: { sort?: boolean }): string => {
+		const formatCompactSummary = (items: string[], config?: { sort?: boolean }): string => {
 			const labels = items.map((item) => item.trim()).filter((item) => item.length > 0);
-			if (options?.sort !== false) {
+			if (config?.sort !== false) {
 				labels.sort((a, b) => a.localeCompare(b));
 			}
-			return theme.fg("dim", `  ${labels.join(", ")}`);
+			return labels.join(", ");
+		};
+		const formatCompactList = (items: string[], options?: { sort?: boolean }): string => {
+			return theme.fg("dim", `  ${formatCompactSummary(items, options)}`);
 		};
 		const addLoadedSection = (
 			name: string,
@@ -1290,6 +1352,7 @@ export class InteractiveMode {
 			this.chatContainer.addChild(section);
 			this.chatContainer.addChild(new Spacer(1));
 		};
+		const sidebarSections: Array<{ label: string; value: string }> = [];
 
 		const skillsResult = this.session.resourceLoader.getSkills();
 		const promptsResult = this.session.resourceLoader.getPrompts();
@@ -1322,18 +1385,30 @@ export class InteractiveMode {
 			}
 		}
 
-		if (showListing) {
+		if (showListing || updateSidebar) {
 			const contextFiles = this.session.resourceLoader.getAgentsFiles().agentsFiles;
 			if (contextFiles.length > 0) {
-				this.chatContainer.addChild(new Spacer(1));
-				const contextList = contextFiles
-					.map((f) => theme.fg("dim", `  ${this.formatDisplayPath(f.path)}`))
-					.join("\n");
-				const contextCompactList = formatCompactList(
+				const contextSummary = formatCompactSummary(
 					contextFiles.map((contextFile) => this.formatContextPath(contextFile.path)),
 					{ sort: false },
 				);
-				addLoadedSection("Context", contextCompactList, contextList);
+				if (updateSidebar) {
+					sidebarSections.push({ label: "Context", value: contextSummary });
+				}
+				if (!updateSidebar) {
+					this.chatContainer.addChild(new Spacer(1));
+					const contextList = contextFiles
+						.map((f) => theme.fg("dim", `  ${this.formatDisplayPath(f.path)}`))
+						.join("\n");
+					addLoadedSection(
+						"Context",
+						formatCompactList(
+							contextFiles.map((contextFile) => this.formatContextPath(contextFile.path)),
+							{ sort: false },
+						),
+						contextList,
+					);
+				}
 			}
 
 			const skills = skillsResult.skills;
@@ -1345,8 +1420,13 @@ export class InteractiveMode {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const skillCompactList = formatCompactList(skills.map((skill) => skill.name));
-				addLoadedSection("Skills", skillCompactList, skillList);
+				const skillSummary = formatCompactSummary(skills.map((skill) => skill.name));
+				if (updateSidebar) {
+					sidebarSections.push({ label: "Skills", value: skillSummary });
+				}
+				if (!updateSidebar) {
+					addLoadedSection("Skills", formatCompactList(skills.map((skill) => skill.name)), skillList);
+				}
 			}
 
 			const templates = this.session.promptTemplates;
@@ -1365,8 +1445,17 @@ export class InteractiveMode {
 						return template ? `/${template.name}` : this.formatDisplayPath(item.path);
 					},
 				});
-				const promptCompactList = formatCompactList(templates.map((template) => `/${template.name}`));
-				addLoadedSection("Prompts", promptCompactList, templateList);
+				const promptSummary = formatCompactSummary(templates.map((template) => `/${template.name}`));
+				if (updateSidebar) {
+					sidebarSections.push({ label: "Prompts", value: promptSummary });
+				}
+				if (!updateSidebar) {
+					addLoadedSection(
+						"Prompts",
+						formatCompactList(templates.map((template) => `/${template.name}`)),
+						templateList,
+					);
+				}
 			}
 
 			if (extensions.length > 0) {
@@ -1375,8 +1464,18 @@ export class InteractiveMode {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const extensionCompactList = formatCompactList(this.getCompactExtensionLabels(extensions));
-				addLoadedSection("Extensions", extensionCompactList, extList, "mdHeading");
+				const extensionSummary = formatCompactSummary(this.getCompactExtensionLabels(extensions));
+				if (updateSidebar) {
+					sidebarSections.push({ label: "Extensions", value: extensionSummary });
+				}
+				if (!updateSidebar) {
+					addLoadedSection(
+						"Extensions",
+						formatCompactList(this.getCompactExtensionLabels(extensions)),
+						extList,
+						"mdHeading",
+					);
+				}
 			}
 
 			// Show loaded themes (excluding built-in)
@@ -1393,14 +1492,27 @@ export class InteractiveMode {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const themeCompactList = formatCompactList(
-					customThemes.map(
-						(loadedTheme) =>
-							loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
-					),
+				const themeNames = customThemes.map(
+					(loadedTheme) =>
+						loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
 				);
-				addLoadedSection("Themes", themeCompactList, themeList);
+				if (updateSidebar) {
+					sidebarSections.push({ label: "Themes", value: formatCompactSummary(themeNames) });
+				}
+				if (!updateSidebar) {
+					const themeCompactList = formatCompactList(
+						customThemes.map(
+							(loadedTheme) =>
+								loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
+						),
+					);
+					addLoadedSection("Themes", themeCompactList, themeList);
+				}
 			}
+		}
+
+		if (updateSidebar) {
+			this.sidebarComponent.setResourceSections(sidebarSections);
 		}
 
 		if (showDiagnostics) {
@@ -1551,6 +1663,7 @@ export class InteractiveMode {
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
+		this.sidebarComponent.setSession(this.session);
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
@@ -1562,12 +1675,14 @@ export class InteractiveMode {
 			this.editor.setPaddingX?.(editorPaddingX);
 			this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
 		}
+		this.refreshDockHints();
 	}
 
 	private async handleRuntimeSessionChange(): Promise<void> {
 		this.resetExtensionUI();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this.setTranscriptScrollOffset(0);
 		this.applyRuntimeSettings();
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
@@ -1587,6 +1702,7 @@ export class InteractiveMode {
 	private renderCurrentSessionState(): void {
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
+		this.setTranscriptScrollOffset(0);
 		this.compactionQueuedMessages = [];
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
@@ -1766,7 +1882,7 @@ export class InteractiveMode {
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
-		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true, true);
+		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, false, false);
 		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false, false);
 		this.ui.requestRender();
 	}
@@ -1807,21 +1923,14 @@ export class InteractiveMode {
 			this.customFooter.dispose();
 		}
 
-		// Remove current footer from main container
-		if (this.customFooter) {
-			this.mainContainer.removeChild(this.customFooter);
-		} else {
-			this.mainContainer.removeChild(this.footer);
-		}
-
 		if (factory) {
 			// Create and add custom footer, passing the data provider
 			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
-			this.mainContainer.addChild(this.customFooter);
+			this.dockComponent.setFooter(this.customFooter);
 		} else {
 			// Restore built-in footer
 			this.customFooter = undefined;
-			this.mainContainer.addChild(this.footer);
+			this.dockComponent.setFooter(this.footer);
 		}
 
 		this.ui.requestRender();
@@ -1986,10 +2095,7 @@ export class InteractiveMode {
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionSelector);
-			this.ui.setFocus(this.extensionSelector);
-			this.ui.requestRender();
+			this.showDockInteraction(this.extensionSelector, this.extensionSelector);
 		});
 	}
 
@@ -1998,11 +2104,8 @@ export class InteractiveMode {
 	 */
 	private hideExtensionSelector(): void {
 		this.extensionSelector?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
 		this.extensionSelector = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
+		this.restoreComposerFocus();
 	}
 
 	/**
@@ -2061,10 +2164,7 @@ export class InteractiveMode {
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionInput);
-			this.ui.setFocus(this.extensionInput);
-			this.ui.requestRender();
+			this.showDockInteraction(this.extensionInput, this.extensionInput);
 		});
 	}
 
@@ -2073,11 +2173,8 @@ export class InteractiveMode {
 	 */
 	private hideExtensionInput(): void {
 		this.extensionInput?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
 		this.extensionInput = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
+		this.restoreComposerFocus();
 	}
 
 	/**
@@ -2100,10 +2197,7 @@ export class InteractiveMode {
 				},
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionEditor);
-			this.ui.setFocus(this.extensionEditor);
-			this.ui.requestRender();
+			this.showDockInteraction(this.extensionEditor, this.extensionEditor);
 		});
 	}
 
@@ -2111,11 +2205,8 @@ export class InteractiveMode {
 	 * Hide the extension editor.
 	 */
 	private hideExtensionEditor(): void {
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
 		this.extensionEditor = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
+		this.restoreComposerFocus();
 	}
 
 	/**
@@ -2219,11 +2310,8 @@ export class InteractiveMode {
 		const isOverlay = options?.overlay ?? false;
 
 		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
 			this.editor.setText(savedText);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
+			this.restoreComposerFocus();
 		};
 
 		return new Promise((resolve, reject) => {
@@ -2266,10 +2354,7 @@ export class InteractiveMode {
 						// Expose handle to caller for visibility control
 						options?.onHandle?.(handle);
 					} else {
-						this.editorContainer.clear();
-						this.editorContainer.addChild(component);
-						this.ui.setFocus(component);
-						this.ui.requestRender();
+						this.showDockInteraction(component, component);
 					}
 				})
 				.catch((err) => {
@@ -2346,6 +2431,45 @@ export class InteractiveMode {
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
+		this.ui.addInputListener((data) => {
+			if (this.keybindings.matches(data, "app.transcript.scrollUp")) {
+				this.scrollTranscriptBy(1);
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "app.transcript.scrollDown")) {
+				this.scrollTranscriptBy(-1);
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "app.transcript.pageUp")) {
+				this.scrollTranscriptPage("up");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "app.transcript.pageDown")) {
+				this.scrollTranscriptPage("down");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "app.transcript.scrollTop")) {
+				this.scrollTranscriptToBoundary("top");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "app.transcript.scrollBottom")) {
+				this.scrollTranscriptToBoundary("bottom");
+				return { consume: true };
+			}
+			// SGR mouse events: consume all to prevent terminal scrollback interference.
+			// Scroll buttons (64=up, 65=down) scroll the transcript; other button events are silently consumed.
+			const sgrMouse = data.match(/^\x1b\[<(\d+);(\d+);(\d+)[Mm]$/);
+			if (sgrMouse) {
+				const button = Number(sgrMouse[1]);
+				if (button === 64) {
+					this.scrollTranscriptBy(3);
+				} else if (button === 65) {
+					this.scrollTranscriptBy(-3);
+				}
+				return { consume: true };
+			}
+			return undefined;
+		});
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
@@ -3667,15 +3791,10 @@ export class InteractiveMode {
 	 */
 	private showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
 		const done = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.restoreComposerFocus();
 		};
 		const { component, focus } = create(done);
-		this.editorContainer.clear();
-		this.editorContainer.addChild(component);
-		this.ui.setFocus(focus);
-		this.ui.requestRender();
+		this.showDockInteraction(component, focus);
 	}
 
 	private showSettingsSelector(): void {
@@ -4252,19 +4371,20 @@ export class InteractiveMode {
 			return;
 		}
 
-		const options = allProviders.map((p) => {
+		const providerOptions = allProviders.map((p) => {
 			const credentials = this.session.modelRegistry.authStorage.get(p.id);
 			const isLoggedIn = credentials?.type === "oauth";
-			return { value: p.id as string, label: p.name, hint: isLoggedIn ? "logged in" : undefined };
+			return {
+				id: p.id as string,
+				label: isLoggedIn ? `${p.name} (logged in)` : p.name,
+			};
 		});
 
-		const selectedId = await withClackFlow(this.ui, async () => {
-			const result = await clack.select({
-				message: mode === "login" ? "Select provider to login:" : "Select provider to logout:",
-				options,
-			});
-			return clack.isCancel(result) ? undefined : (result as string);
-		});
+		const selectedLabel = await this.showExtensionSelector(
+			mode === "login" ? "Select provider to login" : "Select provider to logout",
+			providerOptions.map((option) => option.label),
+		);
+		const selectedId = providerOptions.find((option) => option.label === selectedLabel)?.id;
 
 		if (!selectedId) return;
 
@@ -4300,11 +4420,8 @@ export class InteractiveMode {
 			// Completion handled below
 		});
 
-		// Show dialog in editor container
-		this.editorContainer.clear();
-		this.editorContainer.addChild(dialog);
-		this.ui.setFocus(dialog);
-		this.ui.requestRender();
+		// Show dialog in the dock interaction slot
+		this.showDockInteraction(dialog, dialog);
 
 		// Promise for manual code input (racing with callback server)
 		let manualCodeResolve: ((code: string) => void) | undefined;
@@ -4316,10 +4433,7 @@ export class InteractiveMode {
 
 		// Restore editor helper
 		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
+			this.restoreComposerFocus();
 		};
 
 		try {
@@ -4445,19 +4559,11 @@ export class InteractiveMode {
 		reloadBox.addChild(new Spacer(1));
 		reloadBox.addChild(new DynamicBorder(borderColor));
 
-		const previousEditor = this.editor;
-		this.editorContainer.clear();
-		this.editorContainer.addChild(reloadBox);
-		this.ui.setFocus(reloadBox);
+		this.showDockInteraction(reloadBox, reloadBox);
 		this.ui.requestRender(true);
 		await new Promise((resolve) => process.nextTick(resolve));
 
-		const dismissReloadBox = (editor: Component) => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(editor);
-			this.ui.setFocus(editor);
-			this.ui.requestRender();
-		};
+		const dismissReloadBox = () => this.restoreComposerFocus();
 
 		try {
 			await this.session.reload();
@@ -4489,7 +4595,7 @@ export class InteractiveMode {
 				this.setupExtensionShortcuts(runner);
 			}
 			this.rebuildChatFromMessages();
-			dismissReloadBox(this.editor as Component);
+			dismissReloadBox();
 			this.showLoadedResources({
 				force: false,
 				showDiagnosticsWhenQuiet: true,
@@ -4500,7 +4606,7 @@ export class InteractiveMode {
 			}
 			this.showStatus("Reloaded keybindings, extensions, skills, prompts, themes");
 		} catch (error) {
-			dismissReloadBox(previousEditor as Component);
+			dismissReloadBox();
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
@@ -4626,16 +4732,11 @@ export class InteractiveMode {
 
 		// Show cancellable loader, replacing the editor
 		const loader = new BorderedLoader(this.ui, theme, "Creating gist...");
-		this.editorContainer.clear();
-		this.editorContainer.addChild(loader);
-		this.ui.setFocus(loader);
-		this.ui.requestRender();
+		this.showDockInteraction(loader, loader);
 
 		const restoreEditor = () => {
 			loader.dispose();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.restoreComposerFocus();
 			try {
 				fs.unlinkSync(tmpFile);
 			} catch {
