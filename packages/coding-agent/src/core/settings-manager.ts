@@ -85,6 +85,7 @@ export interface Settings {
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
+	disabledSkills?: string[]; // Skill names hidden from system prompt (still invokable via /skill:name)
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
@@ -855,6 +856,17 @@ export class SettingsManager {
 		this.globalSettings.enableSkillCommands = enabled;
 		this.markModified("enableSkillCommands");
 		this.save();
+	}
+
+	getDisabledSkills(): string[] {
+		return [...(this.settings.disabledSkills ?? [])];
+	}
+
+	setProjectDisabledSkills(names: string[]): void {
+		const projectSettings = structuredClone(this.projectSettings);
+		projectSettings.disabledSkills = names;
+		this.markProjectModified("disabledSkills");
+		this.saveProjectSettings(projectSettings);
 	}
 
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {

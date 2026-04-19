@@ -108,6 +108,7 @@ import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { ShellDockComponent } from "./components/shell-dock.js";
 import { ShellSidebarComponent } from "./components/shell-sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
+import { SkillSelectorComponent } from "./components/skill-selector.js";
 import { ThinkingSelectorComponent } from "./components/thinking-selector.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
@@ -1678,19 +1679,25 @@ export class InteractiveMode {
 
 			const skills = skillsResult.skills;
 			if (skills.length > 0) {
+				const disabledSkillSet = new Set(this.settingsManager.getDisabledSkills());
+				const activeSkills = skills.filter((s) => !disabledSkillSet.has(s.name));
+				const displaySkills = activeSkills.length < skills.length ? activeSkills : skills;
 				const groups = this.buildScopeGroups(
-					skills.map((skill) => ({ path: skill.filePath, sourceInfo: skill.sourceInfo })),
+					displaySkills.map((skill) => ({ path: skill.filePath, sourceInfo: skill.sourceInfo })),
 				);
 				const skillList = this.formatScopeGroups(groups, {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const skillSummary = formatCompactSummary(skills.map((skill) => skill.name));
+				const skillSummary =
+					activeSkills.length < skills.length
+						? `${formatCompactSummary(activeSkills.map((s) => s.name))} (${activeSkills.length}/${skills.length} active)`
+						: formatCompactSummary(skills.map((skill) => skill.name));
 				if (updateSidebar) {
 					capabilitySidebarSections.push({ label: "Skills", value: skillSummary });
 				}
 				if (!updateSidebar) {
-					addLoadedSection("Skills", formatCompactList(skills.map((skill) => skill.name)), skillList);
+					addLoadedSection("Skills", formatCompactList(displaySkills.map((skill) => skill.name)), skillList);
 				}
 			}
 
@@ -2759,6 +2766,7 @@ export class InteractiveMode {
 		this.ui.onDebug = () => this.handleDebugCommand();
 		this.ui.addInputListener((data) => this.handleTranscriptInput(data));
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
+		this.defaultEditor.onAction("app.skills.select", () => this.showSkillSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => this.openExternalEditor());
@@ -2826,6 +2834,12 @@ export class InteractiveMode {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
 				await this.handleModelCommand(searchTerm);
+				return;
+			}
+			if (text === "/skills" || text.startsWith("/skills ")) {
+				const searchTerm = text.startsWith("/skills ") ? text.slice(8).trim() : undefined;
+				this.editor.setText("");
+				this.showSkillSelector(searchTerm);
 				return;
 			}
 			if (text === "/thinking" || text.startsWith("/thinking ")) {
@@ -4393,6 +4407,33 @@ export class InteractiveMode {
 					this.ui.requestRender();
 				},
 				initialSearchInput,
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private showSkillSelector(initialSearch?: string): void {
+		const allSkills = this.session.resourceLoader.getSkills().skills;
+		if (allSkills.length === 0) {
+			this.showStatus("No skills loaded");
+			return;
+		}
+		this.showSelector((done) => {
+			const disabled = this.settingsManager.getDisabledSkills();
+			const selector = new SkillSelectorComponent(
+				allSkills,
+				disabled,
+				(newDisabled) => {
+					this.settingsManager.setProjectDisabledSkills(newDisabled);
+					this.session.rebuildSystemPrompt();
+					this.showLoadedResources({ force: false });
+					this.showStatus(`Skills: ${allSkills.length - newDisabled.length}/${allSkills.length} active`);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				initialSearch,
 			);
 			return { component: selector, focus: selector };
 		});

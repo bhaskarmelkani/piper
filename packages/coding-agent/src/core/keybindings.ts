@@ -19,6 +19,9 @@ export interface AppKeybindings {
 	"app.model.cycleForward": true;
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
+	"app.skills.select": true;
+	"app.skills.enableAll": true;
+	"app.skills.disableAll": true;
 	"app.tools.expand": true;
 	"app.thinking.toggle": true;
 	"app.session.toggleNamedFilter": true;
@@ -76,6 +79,9 @@ export const KEYBINDINGS = {
 		description: "Cycle to previous model",
 	},
 	"app.model.select": { defaultKeys: "ctrl+l", description: "Open model selector" },
+	"app.skills.select": { defaultKeys: [], description: "Open skill selector" },
+	"app.skills.enableAll": { defaultKeys: "ctrl+a", description: "Enable all skills (in skill selector)" },
+	"app.skills.disableAll": { defaultKeys: "ctrl+x", description: "Disable all skills (in skill selector)" },
 	"app.tools.expand": { defaultKeys: "ctrl+o", description: "Toggle tool output" },
 	"app.thinking.toggle": {
 		defaultKeys: "ctrl+t",
