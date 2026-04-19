@@ -318,6 +318,15 @@ export class InteractiveMode {
 	private sidebarComponent: ShellSidebarComponent;
 	private transcriptScrollOffset = 0;
 
+	// Smooth scroll animation: lerp from current display position toward scrollTarget.
+	// Each wheel event advances scrollTarget; an 8 ms timer steps scrollSmoothed toward it.
+	// This removes the jitter caused by Node.js batching multiple SGR events per stdin read.
+	private scrollTarget = 0;
+	private scrollSmoothed = 0;
+	private scrollAnimTimer: ReturnType<typeof setTimeout> | undefined;
+	private static readonly SCROLL_ANIM_MS = 8;
+	private static readonly SCROLL_LERP = 0.4;
+
 	// Sidebar visibility state (actual display also depends on terminal width)
 	private sidebarVisible = true;
 	private sidebarContributions = new Map<string, SidebarContribution>();
@@ -681,7 +690,10 @@ export class InteractiveMode {
 	}
 
 	private scrollTranscriptBy(lines: number): void {
+		this.cancelScrollAnim();
 		this.setTranscriptScrollOffset(this.transcriptScrollOffset + lines);
+		this.scrollTarget = this.transcriptScrollOffset;
+		this.scrollSmoothed = this.transcriptScrollOffset;
 		this.ui.requestRender();
 	}
 
@@ -691,8 +703,72 @@ export class InteractiveMode {
 	}
 
 	private scrollTranscriptToBoundary(boundary: "top" | "bottom"): void {
-		this.setTranscriptScrollOffset(boundary === "top" ? this.transcriptViewport.getMaxScrollOffset() : 0);
+		this.cancelScrollAnim();
+		const offset = boundary === "top" ? this.transcriptViewport.getMaxScrollOffset() : 0;
+		this.setTranscriptScrollOffset(offset);
+		this.scrollTarget = offset;
+		this.scrollSmoothed = offset;
 		this.ui.requestRender();
+	}
+
+	private addWheelScroll(direction: "up" | "down"): void {
+		const delta = direction === "up" ? 1 : -1;
+		const maxOffset = this.transcriptViewport.getMaxScrollOffset();
+		this.scrollTarget = Math.max(0, Math.min(this.scrollTarget + delta, maxOffset));
+		if (this.scrollAnimTimer === undefined) {
+			this.tickScrollAnim();
+		}
+	}
+
+	private tickScrollAnim(): void {
+		const maxOffset = this.transcriptViewport.getMaxScrollOffset();
+		const target = Math.max(0, Math.min(this.scrollTarget, maxOffset));
+		const remaining = target - this.scrollSmoothed;
+
+		if (Math.abs(remaining) < 0.1) {
+			this.scrollSmoothed = target;
+			this.scrollTarget = target;
+			const snapped = Math.round(target);
+			if (snapped !== this.transcriptScrollOffset) {
+				const prev = this.transcriptScrollOffset;
+				this.setTranscriptScrollOffset(snapped);
+				if (this.transcriptScrollOffset !== prev) {
+					this.ui.requestRender();
+				}
+			}
+			this.scrollAnimTimer = undefined;
+			return;
+		}
+
+		this.scrollSmoothed += remaining * InteractiveMode.SCROLL_LERP;
+		const newOffset = Math.round(this.scrollSmoothed);
+		if (newOffset !== this.transcriptScrollOffset) {
+			const prev = this.transcriptScrollOffset;
+			this.setTranscriptScrollOffset(newOffset);
+			if (this.transcriptScrollOffset !== prev) {
+				// Offset actually moved — render and keep animating.
+				this.ui.requestRender();
+			} else {
+				// setTranscriptScrollOffset clamped us to the boundary.
+				// Snap and stop so we don't keep firing no-op ticks.
+				this.scrollSmoothed = this.transcriptScrollOffset;
+				this.scrollTarget = this.transcriptScrollOffset;
+				this.scrollAnimTimer = undefined;
+				return;
+			}
+		}
+
+		this.scrollAnimTimer = setTimeout(() => {
+			this.scrollAnimTimer = undefined;
+			this.tickScrollAnim();
+		}, InteractiveMode.SCROLL_ANIM_MS);
+	}
+
+	private cancelScrollAnim(): void {
+		if (this.scrollAnimTimer !== undefined) {
+			clearTimeout(this.scrollAnimTimer);
+			this.scrollAnimTimer = undefined;
+		}
 	}
 
 	private handleTranscriptInput(data: string): { consume?: boolean } | undefined {
@@ -721,11 +797,12 @@ export class InteractiveMode {
 			return { consume: true };
 		}
 
-		// Trackpad/wheel scroll: route to transcript regardless of pointer position.
+		// Trackpad/wheel scroll: animate toward target using lerp to smooth out
+		// Node.js stdin batching (multiple events per read → jitter without lerp).
 		// Non-wheel button events (clicks) return undefined so the editor receives them.
 		const wheelDirection = this.getWheelDirection(data);
 		if (wheelDirection !== undefined) {
-			this.scrollTranscriptBy(wheelDirection === "up" ? 1 : -1);
+			this.addWheelScroll(wheelDirection);
 			return { consume: true };
 		}
 

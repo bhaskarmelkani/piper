@@ -226,12 +226,16 @@ describe("interactive shell routing", () => {
 	it("updates transcript scroll state through the helper methods", () => {
 		const fakeThis: any = {
 			transcriptScrollOffset: 0,
+			scrollTarget: 0,
+			scrollSmoothed: 0,
+			scrollAnimTimer: undefined,
 			transcriptViewport: {
 				setScrollOffset: vi.fn(),
 				getHeight: () => 8,
 				getMaxScrollOffset: () => 25,
 			},
 			ui: { requestRender: vi.fn() },
+			cancelScrollAnim: (InteractiveMode as any).prototype.cancelScrollAnim,
 			setTranscriptScrollOffset: (InteractiveMode as any).prototype.setTranscriptScrollOffset,
 			scrollTranscriptBy: (InteractiveMode as any).prototype.scrollTranscriptBy,
 		};
@@ -256,7 +260,7 @@ describe("interactive shell routing", () => {
 				matches: vi.fn((data: string, key: string) => data === "KEY_PAGE_UP" && key === "app.transcript.pageUp"),
 			},
 			editor,
-			scrollTranscriptBy: vi.fn(),
+			addWheelScroll: vi.fn(),
 			scrollTranscriptPage: vi.fn(),
 			scrollTranscriptToBoundary: vi.fn(),
 			getWheelDirection: (InteractiveMode as any).prototype.getWheelDirection,
@@ -268,15 +272,15 @@ describe("interactive shell routing", () => {
 		expect(keyResult).toEqual({ consume: true });
 		expect(fakeThis.scrollTranscriptPage).toHaveBeenCalledWith("up");
 
-		// SGR wheel up (button 64) anywhere → scroll transcript up by 1
+		// SGR wheel up (button 64) → addWheelScroll("up")
 		const wheelUp = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<64;10;5M");
 		expect(wheelUp).toEqual({ consume: true });
-		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(1);
+		expect(fakeThis.addWheelScroll).toHaveBeenCalledWith("up");
 
-		// SGR wheel down (button 65) → scroll transcript down by 1
+		// SGR wheel down (button 65) → addWheelScroll("down")
 		const wheelDown = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<65;10;5M");
 		expect(wheelDown).toEqual({ consume: true });
-		expect(fakeThis.scrollTranscriptBy).toHaveBeenCalledWith(-1);
+		expect(fakeThis.addWheelScroll).toHaveBeenCalledWith("down");
 
 		// Wheel with Shift modifier (button 68 = 64|4) → still a scroll event
 		const modWheel = (InteractiveMode as any).prototype.handleTranscriptInput.call(fakeThis, "\x1b[<68;10;5M");
