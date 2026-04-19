@@ -10,8 +10,28 @@ import {
 	formatTokens,
 	getContextTone,
 	getThinkingTone,
-	renderProgressBar,
+	parsePercentText,
+	renderCompactMeter,
 } from "./sidebar-semantics.js";
+
+type SidebarDisplaySection = ExtensionSidebarSection & { order?: number };
+
+const REQUESTS_ORDER = 20;
+const CONTEXT_ORDER = 30;
+const CAPABILITIES_ORDER = 40;
+const WORKSPACE_ORDER = 50;
+
+const SIDEBAR_COLOR_MAP: Record<string, ThemeColor> = {
+	accent: "accent",
+	success: "success",
+	warning: "warning",
+	error: "error",
+	info: "borderAccent",
+	textPrimary: "text",
+	textSecondary: "muted",
+	muted: "muted",
+	dim: "dim",
+};
 
 /**
  * Read-only right sidebar panel showing model, context, resources, and session state.
@@ -70,9 +90,37 @@ function deriveSessionTitle(session: AgentSession): string | undefined {
 	return undefined;
 }
 
+function getSectionOrder(section: ExtensionSidebarSection): number {
+	const order = (section as SidebarDisplaySection).order;
+	return typeof order === "number" ? order : 100;
+}
+
+function resolveSidebarColor(color: string | undefined): ThemeColor | undefined {
+	if (!color) {
+		return undefined;
+	}
+
+	const normalized = color.trim();
+	if (!normalized || normalized.startsWith("#") || normalized.includes("\x1b[")) {
+		return undefined;
+	}
+
+	return SIDEBAR_COLOR_MAP[normalized];
+}
+
+function formatWorkspaceName(cwd: string): string {
+	const normalized = cwd.replace(/[\\/]+$/, "");
+	if (!normalized) {
+		return cwd;
+	}
+
+	const parts = normalized.split(/[\\/]/).filter(Boolean);
+	return parts.at(-1) ?? cwd;
+}
+
 export class ShellSidebarComponent implements Component {
 	private height = 0;
-	private resourceSections: ExtensionSidebarSection[] = [];
+	private resourceSections: SidebarDisplaySection[] = [];
 
 	constructor(
 		private session: AgentSession,
@@ -88,7 +136,7 @@ export class ShellSidebarComponent implements Component {
 	}
 
 	setResourceSections(resourceSections: ExtensionSidebarSection[]): void {
-		this.resourceSections = resourceSections;
+		this.resourceSections = resourceSections as SidebarDisplaySection[];
 	}
 
 	invalidate(): void {}
@@ -101,6 +149,7 @@ export class ShellSidebarComponent implements Component {
 		const contentWidth = Math.max(1, width - 2);
 		const border = theme.fg("muted", "│");
 		const blank = `${border} ${" ".repeat(contentWidth)}`;
+		const divider = `${border} ${theme.fg("borderMuted", "─".repeat(contentWidth))}`;
 		const wrapLine = (text: string): string[] => {
 			const wrapped = wrapTextWithAnsi(text, contentWidth);
 			if (wrapped.length === 0) {
@@ -112,36 +161,85 @@ export class ShellSidebarComponent implements Component {
 				return `${border} ${padded}`;
 			});
 		};
-
-		const section = (label: string, value: string): string[] => {
-			return [blank, ...wrapLine(theme.fg("muted", label)), ...wrapLine(value)];
+		const labeledSection = (label: string, value: string): string[] => [
+			...wrapLine(theme.fg("muted", label)),
+			...wrapLine(value),
+		];
+		const compactSection = (label: string, value: string): string[] =>
+			wrapLine(`${theme.fg("muted", `${label} `)}${value}`);
+		const joinGroups = (groups: string[][]): string[] => {
+			const lines: string[] = [];
+			for (const group of groups) {
+				if (group.length === 0) {
+					continue;
+				}
+				if (lines.length > 0) {
+					lines.push(divider);
+				}
+				lines.push(...group);
+			}
+			return lines;
 		};
+		const renderExtensionSections = (sections: SidebarDisplaySection[]): string[] =>
+			sections.flatMap((section) => {
+				const label = normalizeSectionText(section.label);
+				const value = truncateSectionValue(section.value);
+				if (!label || !value) {
+					return [];
+				}
+				const tone = resolveSidebarColor(section.color);
+				const percent = parsePercentText(value);
+				if (percent !== null) {
+					const meterTone = tone ?? getContextTone(percent);
+					const meterWidth = Math.max(8, Math.min(18, contentWidth - 8));
+					return [
+						...wrapLine(theme.fg("muted", label)),
+						...wrapLine(
+							`${theme.fg(meterTone, renderCompactMeter(percent, meterWidth))} ${theme.fg(
+								meterTone,
+								formatPercent(percent),
+							)}`,
+						),
+					];
+				}
+				const coloredValue = tone ? theme.fg(tone, value) : theme.fg("text", value);
+				return labeledSection(label, coloredValue);
+			});
 
-		const compactSection = (label: string, value: string): string[] => {
-			return wrapLine(`${theme.fg("muted", `${label} `)}${value}`);
-		};
+		const orderedSections = [...this.resourceSections].sort(
+			(a, b) =>
+				getSectionOrder(a) - getSectionOrder(b) ||
+				normalizeSectionText(a.label).localeCompare(normalizeSectionText(b.label)),
+		);
+		const requestSections = orderedSections.filter((section) => getSectionOrder(section) === REQUESTS_ORDER);
+		const contextSections = orderedSections.filter((section) => getSectionOrder(section) === CONTEXT_ORDER);
+		const capabilitySections = orderedSections.filter((section) => getSectionOrder(section) === CAPABILITIES_ORDER);
+		const workspaceSections = orderedSections.filter((section) => getSectionOrder(section) === WORKSPACE_ORDER);
+		const overflowSections = orderedSections.filter((section) => getSectionOrder(section) > WORKSPACE_ORDER);
 
-		const topLines: string[] = [];
-		const bottomLines: string[] = [];
+		const topGroups: string[][] = [];
+		const bottomGroups: string[][] = [];
 
 		const sessionTitle = deriveSessionTitle(this.session);
+		const headerGroup: string[] = [];
 		if (sessionTitle) {
-			topLines.push(...wrapLine(theme.fg("accent", sessionTitle)));
-			topLines.push(blank);
+			headerGroup.push(...wrapLine(theme.bold(theme.fg("accent", sessionTitle))));
 		}
 
 		const model = this.session.model;
 		if (model) {
-			topLines.push(...wrapLine(`${theme.fg("muted", `${model.provider} `)}${theme.fg("accent", model.id)}`));
+			headerGroup.push(
+				...labeledSection("Model", `${theme.fg("text", model.id)} ${theme.fg("dim", `(${model.provider})`)}`),
+			);
 		} else {
-			topLines.push(...wrapLine(theme.fg("muted", "no model")));
+			headerGroup.push(...labeledSection("Model", theme.fg("muted", "unresolved")));
 		}
 
 		const thinkingLevel = this.session.thinkingLevel;
-		if (model?.reasoning && thinkingLevel !== "off") {
-			topLines.push(blank);
-			topLines.push(...compactSection("Thinking", theme.fg(getThinkingTone(thinkingLevel), thinkingLevel)));
-		}
+		const thinkingTone = model?.reasoning ? getThinkingTone(thinkingLevel) : "muted";
+		const thinkingValue = model?.reasoning ? thinkingLevel : "unsupported";
+		headerGroup.push(...labeledSection("Thinking", theme.fg(thinkingTone, thinkingValue)));
+		topGroups.push(headerGroup);
 
 		let totalInput = 0;
 		let totalOutput = 0;
@@ -152,49 +250,71 @@ export class ShellSidebarComponent implements Component {
 			}
 		}
 
+		const requestGroup: string[] = [];
+		requestGroup.push(...renderExtensionSections(requestSections));
 		if (totalInput > 0 || totalOutput > 0) {
-			topLines.push(...compactSection("Usage", `↑${formatTokens(totalInput)} ↓${formatTokens(totalOutput)}`));
+			requestGroup.push(
+				...compactSection(
+					"Usage",
+					`${theme.fg("text", `↑${formatTokens(totalInput)} ↓${formatTokens(totalOutput)}`)}`,
+				),
+			);
+		}
+		if (requestGroup.length > 0) {
+			topGroups.push(requestGroup);
 		}
 
+		const contextGroup: string[] = [];
 		const contextUsage = this.session.getContextUsage();
 		if (contextUsage && contextUsage.percent !== null) {
 			const tone = getContextTone(contextUsage.percent);
-			const meterWidth = Math.max(8, Math.min(10, contentWidth - 8));
-			topLines.push(blank);
-			topLines.push(...wrapLine(theme.fg("muted", "Context")));
-			topLines.push(
+			const meterWidth = Math.max(8, Math.min(18, contentWidth - 8));
+			contextGroup.push(...wrapLine(theme.fg("muted", "Context")));
+			contextGroup.push(
 				...wrapLine(
-					`${theme.fg(tone, renderProgressBar(contextUsage.percent, meterWidth))} ${theme.fg(
+					`${theme.fg(tone, renderCompactMeter(contextUsage.percent, meterWidth))} ${theme.fg(
 						tone,
 						formatPercent(contextUsage.percent),
 					)}`,
 				),
 			);
-			topLines.push(...wrapLine(theme.fg("muted", formatContextSummary(contextUsage))));
+			contextGroup.push(...wrapLine(theme.fg("muted", formatContextSummary(contextUsage))));
 		} else if (contextUsage) {
-			topLines.push(blank);
-			topLines.push(...compactSection("Context", theme.fg("muted", formatContextSummary(contextUsage))));
+			contextGroup.push(...compactSection("Context", theme.fg("muted", formatContextSummary(contextUsage))));
+		}
+		contextGroup.push(...renderExtensionSections(contextSections));
+		if (contextGroup.length > 0) {
+			topGroups.push(contextGroup);
+		}
+
+		const capabilityGroup = renderExtensionSections(capabilitySections);
+		if (capabilityGroup.length > 0) {
+			topGroups.push(capabilityGroup);
 		}
 
 		const cwd = this.session.sessionManager.getCwd();
-		const home = process.env.HOME || process.env.USERPROFILE;
-		const displayCwd = home && cwd.startsWith(home) ? `~${cwd.slice(home.length)}` : cwd;
-		bottomLines.push(...section("Path", theme.fg("muted", displayCwd)));
+		const displayCwd = formatWorkspaceName(cwd);
+		const workspaceGroup: string[] = [];
+		workspaceGroup.push(...labeledSection("Workspace", theme.fg("text", displayCwd)));
 
 		const branch = this.footerData.getGitBranch();
 		if (branch) {
-			bottomLines.push(...compactSection("Branch", branch));
+			workspaceGroup.push(...labeledSection("Git", theme.fg("text", branch)));
 		}
 
-		for (const resourceSection of this.resourceSections) {
-			const label = normalizeSectionText(resourceSection.label);
-			const display = truncateSectionValue(resourceSection.value);
-			if (!label || !display) {
-				continue;
-			}
-			const colored = resourceSection.color ? theme.fg(resourceSection.color as ThemeColor, display) : display;
-			bottomLines.push(...section(label, colored));
-		}
+		const statuses = Array.from(this.footerData.getExtensionStatuses().values())
+			.map((status) => status.trim())
+			.filter(Boolean);
+		const statusValue = statuses.length > 0 ? truncateSectionValue(statuses.join(", ")) : "ready";
+		workspaceGroup.push(
+			...labeledSection("Status", theme.fg(statuses.length > 0 ? "warning" : "success", statusValue)),
+		);
+		workspaceGroup.push(...renderExtensionSections(workspaceSections));
+		workspaceGroup.push(...renderExtensionSections(overflowSections));
+		bottomGroups.push(workspaceGroup);
+
+		const topLines = joinGroups(topGroups);
+		const bottomLines = joinGroups(bottomGroups);
 
 		const maxBottomHeight = Math.max(0, this.height - topLines.length);
 		const visibleBottomLines = bottomLines.slice(Math.max(0, bottomLines.length - maxBottomHeight));

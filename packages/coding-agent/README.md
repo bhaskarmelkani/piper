@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://shittycodingagent.ai">
-    <img src="https://shittycodingagent.ai/logo.svg" alt="pi logo" width="128">
+    <img src="https://shittycodingagent.ai/logo.svg" alt="piper logo" width="128">
   </a>
 </p>
 <p align="center">

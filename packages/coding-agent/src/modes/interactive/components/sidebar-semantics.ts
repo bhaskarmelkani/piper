@@ -12,8 +12,8 @@ export function formatTokens(count: number): string {
 
 export function getContextTone(percent: number | null): ThemeColor {
 	if (percent === null) return "muted";
-	if (percent >= 90) return "error";
-	if (percent >= 70) return "warning";
+	if (percent >= 85) return "error";
+	if (percent >= 60) return "warning";
 	return "success";
 }
 
@@ -41,9 +41,24 @@ export function renderProgressBar(percent: number, width: number): string {
 	return `${"█".repeat(filled)}${"░".repeat(empty)}`;
 }
 
+export function renderCompactMeter(percent: number, width: number): string {
+	const clampedPercent = Math.max(0, Math.min(100, percent));
+	const filled = Math.max(1, Math.round((clampedPercent / 100) * width));
+	const empty = Math.max(0, width - filled);
+	return `${"━".repeat(filled)}${"┄".repeat(empty)}`;
+}
+
 export function formatPercent(percent: number): string {
 	const clampedPercent = Math.max(0, Math.min(100, percent));
 	return clampedPercent >= 10 ? `${Math.round(clampedPercent)}%` : `${clampedPercent.toFixed(1)}%`;
+}
+
+export function parsePercentText(value: string): number | null {
+	const match = value.trim().match(/^(\d+(?:\.\d+)?)%$/);
+	if (!match) {
+		return null;
+	}
+	return Number(match[1]);
 }
 
 export function formatContextSummary(contextUsage: ContextUsage | undefined): string {

@@ -12,6 +12,7 @@ export class Viewport implements Component {
 	private anchor: ViewportAnchor;
 	private lastContentHeight = 0;
 	private lastViewportHeight = 0;
+	private lastRenderWidth = 0;
 
 	constructor(
 		private child: Component,
@@ -71,10 +72,20 @@ export class Viewport implements Component {
 		if (viewportHeight === 0) {
 			this.lastContentHeight = 0;
 			this.lastViewportHeight = 0;
+			this.lastRenderWidth = width;
 			return [];
 		}
 
+		if (
+			(this.lastRenderWidth !== 0 && this.lastRenderWidth !== width) ||
+			(this.lastViewportHeight !== 0 && this.lastViewportHeight !== viewportHeight)
+		) {
+			this.lastContentHeight = 0;
+			this.lastViewportHeight = 0;
+		}
+
 		const lines = this.child.render(width);
+		this.lastRenderWidth = width;
 		this.lastContentHeight = lines.length;
 		this.lastViewportHeight = viewportHeight;
 

@@ -44,6 +44,7 @@ import {
 import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
+	APP_SYMBOL,
 	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
@@ -161,6 +162,8 @@ type SidebarContribution = {
 	order: number;
 	sequence: number;
 };
+
+type SidebarDisplaySection = ExtensionSidebarSection & { order?: number };
 
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party usage now draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
@@ -291,7 +294,9 @@ export class InteractiveMode {
 
 	// Extension UI state
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
+	private extensionSelectorCancel: (() => void) | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
+	private extensionInputCancel: (() => void) | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
 
@@ -336,7 +341,9 @@ export class InteractiveMode {
 	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
 	private static readonly MIN_TRANSCRIPT_HEIGHT = 6;
 	private static readonly MAX_DOCK_HEIGHT_RATIO = 0.4;
-	private static readonly BUILTIN_SIDEBAR_KEY = "__builtin__";
+	private static readonly SCROLL_EPSILON = 0.1;
+	private static readonly BUILTIN_SIDEBAR_CONTEXT_KEY = "__builtin_context__";
+	private static readonly BUILTIN_SIDEBAR_CAPABILITIES_KEY = "__builtin_capabilities__";
 	private static readonly LEGACY_EXTENSION_SIDEBAR_KEY = "__legacy_extension__";
 
 	// Convenience accessors
@@ -604,7 +611,11 @@ export class InteractiveMode {
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const logo =
+				theme.bold(theme.fg("accent", APP_SYMBOL)) +
+				theme.fg("dim", " ") +
+				theme.bold(theme.fg("accent", APP_NAME)) +
+				theme.fg("dim", ` v${this.version}`);
 
 			const onboarding = theme.fg(
 				"dim",
@@ -712,9 +723,20 @@ export class InteractiveMode {
 	}
 
 	private addWheelScroll(direction: "up" | "down"): void {
-		const delta = direction === "up" ? 1 : -1;
 		const maxOffset = this.transcriptViewport.getMaxScrollOffset();
-		this.scrollTarget = Math.max(0, Math.min(this.scrollTarget + delta, maxOffset));
+		const atTop = this.scrollTarget >= maxOffset && this.transcriptScrollOffset >= maxOffset;
+		const atBottom = this.scrollTarget <= 0 && this.transcriptScrollOffset <= 0;
+		if ((direction === "up" && atTop) || (direction === "down" && atBottom)) {
+			return;
+		}
+
+		const delta = direction === "up" ? 1 : -1;
+		const nextTarget = Math.max(0, Math.min(this.scrollTarget + delta, maxOffset));
+		if (nextTarget === this.scrollTarget) {
+			return;
+		}
+
+		this.scrollTarget = nextTarget;
 		if (this.scrollAnimTimer === undefined) {
 			this.tickScrollAnim();
 		}
@@ -725,7 +747,7 @@ export class InteractiveMode {
 		const target = Math.max(0, Math.min(this.scrollTarget, maxOffset));
 		const remaining = target - this.scrollSmoothed;
 
-		if (Math.abs(remaining) < 0.1) {
+		if (Math.abs(remaining) < InteractiveMode.SCROLL_EPSILON) {
 			this.scrollSmoothed = target;
 			this.scrollTarget = target;
 			const snapped = Math.round(target);
@@ -747,7 +769,9 @@ export class InteractiveMode {
 			this.setTranscriptScrollOffset(newOffset);
 			if (this.transcriptScrollOffset !== prev) {
 				// Offset actually moved — render and keep animating.
-				this.ui.requestRender();
+				if (Math.abs(remaining) > InteractiveMode.SCROLL_EPSILON) {
+					this.ui.requestRender();
+				}
 			} else {
 				// setTranscriptScrollOffset clamped us to the boundary.
 				// Snap and stop so we don't keep firing no-op ticks.
@@ -847,7 +871,9 @@ export class InteractiveMode {
 	private getFlattenedSidebarSections(): ExtensionSidebarSection[] {
 		return Array.from(this.sidebarContributions.values())
 			.sort((a, b) => a.order - b.order || a.sequence - b.sequence)
-			.flatMap((entry) => entry.sections);
+			.flatMap((entry) =>
+				entry.sections.map((section) => ({ ...section, order: entry.order }) as SidebarDisplaySection),
+			);
 	}
 
 	private applySidebarContributions(): void {
@@ -892,9 +918,9 @@ export class InteractiveMode {
 		const cwdBasename = path.basename(this.sessionManager.getCwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`π - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`${APP_SYMBOL} - ${sessionName} - ${cwdBasename}`);
 		} else {
-			this.ui.terminal.setTitle(`π - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`${APP_SYMBOL} - ${cwdBasename}`);
 		}
 	}
 
@@ -1559,7 +1585,8 @@ export class InteractiveMode {
 			this.chatContainer.addChild(section);
 			this.chatContainer.addChild(new Spacer(1));
 		};
-		const sidebarSections: ExtensionSidebarSection[] = [];
+		const contextSidebarSections: ExtensionSidebarSection[] = [];
+		const capabilitySidebarSections: ExtensionSidebarSection[] = [];
 
 		const skillsResult = this.session.resourceLoader.getSkills();
 		const promptsResult = this.session.resourceLoader.getPrompts();
@@ -1600,7 +1627,10 @@ export class InteractiveMode {
 					{ sort: false },
 				);
 				if (updateSidebar) {
-					sidebarSections.push({ label: "Context", value: contextSummary });
+					contextSidebarSections.push({
+						label: contextFiles.length === 1 ? "Context File" : "Context Files",
+						value: contextSummary,
+					});
 				}
 				if (!updateSidebar) {
 					this.chatContainer.addChild(new Spacer(1));
@@ -1629,7 +1659,7 @@ export class InteractiveMode {
 				});
 				const skillSummary = formatCompactSummary(skills.map((skill) => skill.name));
 				if (updateSidebar) {
-					sidebarSections.push({ label: "Skills", value: skillSummary });
+					capabilitySidebarSections.push({ label: "Skills", value: skillSummary });
 				}
 				if (!updateSidebar) {
 					addLoadedSection("Skills", formatCompactList(skills.map((skill) => skill.name)), skillList);
@@ -1654,7 +1684,7 @@ export class InteractiveMode {
 				});
 				const promptSummary = formatCompactSummary(templates.map((template) => `/${template.name}`));
 				if (updateSidebar) {
-					sidebarSections.push({ label: "Prompts", value: promptSummary });
+					capabilitySidebarSections.push({ label: "Prompts", value: promptSummary });
 				}
 				if (!updateSidebar) {
 					addLoadedSection(
@@ -1673,7 +1703,7 @@ export class InteractiveMode {
 				});
 				const extensionSummary = formatCompactSummary(this.getCompactExtensionLabels(extensions));
 				if (updateSidebar) {
-					sidebarSections.push({ label: "Extensions", value: extensionSummary });
+					capabilitySidebarSections.push({ label: "Extensions", value: extensionSummary });
 				}
 				if (!updateSidebar) {
 					addLoadedSection(
@@ -1704,7 +1734,7 @@ export class InteractiveMode {
 						loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
 				);
 				if (updateSidebar) {
-					sidebarSections.push({ label: "Themes", value: formatCompactSummary(themeNames) });
+					capabilitySidebarSections.push({ label: "Themes", value: formatCompactSummary(themeNames) });
 				}
 				if (!updateSidebar) {
 					const themeCompactList = formatCompactList(
@@ -1719,7 +1749,12 @@ export class InteractiveMode {
 		}
 
 		if (updateSidebar) {
-			this.setSidebarSectionsForKey(InteractiveMode.BUILTIN_SIDEBAR_KEY, sidebarSections, { order: 100 });
+			this.setSidebarSectionsForKey(InteractiveMode.BUILTIN_SIDEBAR_CONTEXT_KEY, contextSidebarSections, {
+				order: 30,
+			});
+			this.setSidebarSectionsForKey(InteractiveMode.BUILTIN_SIDEBAR_CAPABILITIES_KEY, capabilitySidebarSections, {
+				order: 40,
+			});
 		}
 
 		if (showDiagnostics) {
@@ -2079,10 +2114,14 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(): void {
-		if (this.extensionSelector) {
+		if (this.extensionSelectorCancel) {
+			this.extensionSelectorCancel();
+		} else if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
-		if (this.extensionInput) {
+		if (this.extensionInputCancel) {
+			this.extensionInputCancel();
+		} else if (this.extensionInput) {
 			this.hideExtensionInput();
 		}
 		if (this.extensionEditor) {
@@ -2314,25 +2353,29 @@ export class InteractiveMode {
 				return;
 			}
 
-			const onAbort = () => {
-				this.hideExtensionSelector();
-				resolve(undefined);
+			let settled = false;
+			const cleanup = () => {
+				opts?.signal?.removeEventListener("abort", onAbort);
+				this.extensionSelectorCancel = undefined;
 			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			const finish = (value: string | undefined) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				this.hideExtensionSelector();
+				resolve(value);
+			};
+			const onAbort = () => finish(undefined);
 
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			this.extensionSelectorCancel = () => finish(undefined);
 			this.extensionSelector = new ExtensionSelectorComponent(
 				title,
 				options,
-				(option) => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
-					resolve(option);
-				},
-				() => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
-					resolve(undefined);
-				},
+				(option) => finish(option),
+				() => finish(undefined),
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
@@ -2383,25 +2426,29 @@ export class InteractiveMode {
 				return;
 			}
 
-			const onAbort = () => {
-				this.hideExtensionInput();
-				resolve(undefined);
+			let settled = false;
+			const cleanup = () => {
+				opts?.signal?.removeEventListener("abort", onAbort);
+				this.extensionInputCancel = undefined;
 			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			const finish = (value: string | undefined) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				this.hideExtensionInput();
+				resolve(value);
+			};
+			const onAbort = () => finish(undefined);
 
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			this.extensionInputCancel = () => finish(undefined);
 			this.extensionInput = new ExtensionInputComponent(
 				title,
 				placeholder,
-				(value) => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
-					resolve(value);
-				},
-				() => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
-					resolve(undefined);
-				},
+				(value) => finish(value.trim().length > 0 ? value : undefined),
+				() => finish(undefined),
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
@@ -5054,15 +5101,36 @@ export class InteractiveMode {
 		const branch = this.footerDataProvider.getGitBranch();
 		const contextUsage = this.session.getContextUsage();
 		const model = this.session.model;
+		const vanitySections = this.sidebarContributions.get("vanity")?.sections ?? [];
 
 		const topOptions: string[] = [];
 		const pct = contextUsage?.percent !== null ? `${contextUsage?.percent?.toFixed(1)}%` : "?";
+		if (vanitySections.length > 0) {
+			topOptions.push("Deep-dive sidebar");
+			topOptions.push("Describe context");
+			topOptions.push("Suggest next action");
+		}
 		topOptions.push(`Session Health  (${pct} context)`);
 		if (skills.length > 0) topOptions.push(`Skills  (${skills.length})`);
 		if (branch) topOptions.push(`Git  (${branch})`);
 
 		const section = await this.showExtensionSelector("Vanity — navigate session context", topOptions);
 		if (!section) return null;
+
+		if (section === "Deep-dive sidebar" || section === "Describe context" || section === "Suggest next action") {
+			const summary = vanitySections.map((entry) => `${entry.label}: ${entry.value}`).join("\n");
+			if (!summary) {
+				return null;
+			}
+
+			if (section === "Deep-dive sidebar") {
+				return `Deep-dive the current sidebar state and explain the practical implications.\n${summary}`;
+			}
+			if (section === "Describe context") {
+				return `Describe the current session context and what is consuming it.\n${summary}`;
+			}
+			return `Suggest and help me execute the best next action for this session.\n${summary}`;
+		}
 
 		if (section.startsWith("Session Health")) {
 			const modelLabel = model ? `${model.provider}/${model.id}` : "no model";

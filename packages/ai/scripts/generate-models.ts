@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env bun
 
 import { writeFileSync } from "fs";
 import { join, dirname } from "path";

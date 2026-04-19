@@ -53,10 +53,10 @@ if [[ "$NO_ENV" == "true" ]]; then
   echo "Running without API keys..."
 fi
 
-TSX_BIN="$SCRIPT_DIR/node_modules/.bin/tsx"
-if [[ ! -x "$TSX_BIN" ]]; then
-  echo "tsx not found at $TSX_BIN. Run npm install from the repo root first." >&2
+BUN_BIN="${BUN_BIN:-$(command -v bun || true)}"
+if [[ -z "$BUN_BIN" ]]; then
+  echo "bun not found in PATH. Install Bun before running piper from source." >&2
   exit 1
 fi
 
-"$TSX_BIN" "$SCRIPT_DIR/packages/coding-agent/src/cli.ts" ${ARGS[@]+"${ARGS[@]}"}
+"$BUN_BIN" "$SCRIPT_DIR/packages/coding-agent/src/bun/cli.ts" ${ARGS[@]+"${ARGS[@]}"}

@@ -13,10 +13,9 @@ import type { ExtensionAPI, ExtensionContext, ExtensionSidebarSection } from "@m
 const execFileAsync = promisify(execFile);
 
 const SIDEBAR_KEY = "copilot-budget";
-const SIDEBAR_ORDER = 30;
+const SIDEBAR_ORDER = 20;
 const CACHE_TTL_MS = 30_000;
 const REQUEST_TIMEOUT_MS = 10_000;
-const BAR_WIDTH = 12;
 const COPILOT_USER_ENDPOINT = "https://api.github.com/copilot_internal/user";
 const EDITOR_VERSION = "vscode/1.96.2";
 const EDITOR_PLUGIN_VERSION = "copilot-chat/0.26.7";
@@ -181,21 +180,15 @@ export async function fetchCopilotUsage(
 
 function formatResetDate(dateStr: string): string {
 	try {
-		return new Date(dateStr).toLocaleDateString(undefined, { day: "numeric", month: "short" });
+		return new Date(dateStr).toLocaleDateString("en-US", { day: "numeric", month: "short" });
 	} catch {
 		return dateStr;
 	}
 }
 
-function renderProgressBar(percent: number): string {
-	const clampedPercent = Math.max(0, Math.min(100, percent));
-	const filled = Math.round((clampedPercent / 100) * BAR_WIDTH);
-	return `${"█".repeat(filled)}${"░".repeat(Math.max(0, BAR_WIDTH - filled))} ${clampedPercent}%`;
-}
-
 function getBudgetColor(percent: number): "success" | "warning" | "error" {
-	if (percent >= 90) return "error";
-	if (percent >= 70) return "warning";
+	if (percent >= 85) return "error";
+	if (percent >= 60) return "warning";
 	return "success";
 }
 
@@ -207,7 +200,7 @@ export function buildCopilotSidebarSections(data: CopilotUsageData | null): Exte
 	const sections: ExtensionSidebarSection[] = [
 		{
 			label: "Copilot Budget",
-			value: renderProgressBar(data.percent),
+			value: `${data.percent}%`,
 			color: getBudgetColor(data.percent),
 		},
 		{

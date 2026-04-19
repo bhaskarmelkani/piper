@@ -64,18 +64,19 @@
 	],
 	"scripts": {
 		"clean": "shx rm -rf dist",
-		"generate-models": "npx tsx scripts/generate-models.ts",
-		"build": "npm run generate-models && tsgo -p tsconfig.build.json",
+		"generate-models": "bun ./scripts/generate-models.ts",
+		"build": "bun run generate-models && tsgo -p tsconfig.build.json",
 		"dev": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
 		"dev:tsc": "tsgo -p tsconfig.build.json --watch --preserveWatchOutput",
-		"test": "vitest --run",
-		"prepublishOnly": "npm run clean && npm run build"
+		"test": "bunx vitest --run",
+		"prepublishOnly": "bun run clean && bun run build"
 	},
 	"dependencies": {
 		"@anthropic-ai/sdk": "^0.90.0",
 		"@aws-sdk/client-bedrock-runtime": "^3.1030.0",
 		"@google/genai": "^1.40.0",
 		"@mistralai/mistralai": "^2.2.0",
+		"@smithy/node-http-handler": "^4.5.3",
 		"@sinclair/typebox": "^0.34.41",
 		"ajv": "^8.17.1",
 		"ajv-formats": "^3.0.1",
@@ -104,7 +105,7 @@
 		"directory": "packages/ai"
 	},
 	"engines": {
-		"node": ">=20.0.0"
+		"bun": ">=1.3.11"
 	},
 	"devDependencies": {
 		"@types/node": "^24.3.0",

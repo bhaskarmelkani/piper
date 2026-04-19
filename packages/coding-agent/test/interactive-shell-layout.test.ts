@@ -138,8 +138,10 @@ describe("interactive shell layout primitives", () => {
 		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
 		sidebar.setHeight(26);
 		sidebar.setResourceSections([
-			{ label: "Context", value: "AGENTS.md" },
-			{ label: "Skills", value: "review, write" },
+			{ label: "Copilot Budget", value: "25%", order: 20, color: "success" } as any,
+			{ label: "Premium", value: "25 / 100 requests", order: 20 } as any,
+			{ label: "Context File", value: "AGENTS.md", order: 30 } as any,
+			{ label: "Skills", value: "review, write", order: 40 } as any,
 		]);
 
 		const rendered = sidebar.render(30).join("\n");
@@ -147,6 +149,8 @@ describe("interactive shell layout primitives", () => {
 		expect(rendered).toContain("claude-sonnet-4.6");
 		expect(rendered).toContain("Investigate Copilot sidebar");
 		expect(rendered).toContain("Usage");
+		expect(rendered).toContain("25%");
+		expect(rendered).toContain("Premium");
 		expect(rendered).toContain("main");
 		expect(rendered).toContain("Skills");
 	});
@@ -166,9 +170,19 @@ describe("interactive shell layout primitives", () => {
 		expect(rendered).toContain("Thinking");
 		expect(rendered).toContain("medium");
 		expect(rendered).toContain("Context");
-		expect(rendered).toContain("█");
+		expect(rendered).toContain("━");
 		expect(rendered).toContain("12%");
 		expect(rendered).toContain("123k / 1.0M");
+	});
+
+	it("uses dividers and short workspace labels in the sidebar", () => {
+		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
+		sidebar.setHeight(20);
+		const rendered = sidebar.render(30).join("\n");
+		expect(rendered).toContain("─");
+		expect(rendered).toContain("Workspace");
+		expect(rendered).toContain("project");
+		expect(rendered).not.toContain("/Users/test/project");
 	});
 
 	it("skips malformed sidebar sections instead of crashing", () => {
@@ -253,6 +267,29 @@ describe("interactive shell routing", () => {
 		expect(fakeThis.transcriptScrollOffset).toBe(25);
 	});
 
+	it("drops wheel scroll events that push past a transcript boundary", () => {
+		const fakeThis: any = {
+			scrollTarget: 0,
+			scrollSmoothed: 0,
+			transcriptScrollOffset: 0,
+			scrollAnimTimer: undefined,
+			transcriptViewport: {
+				getMaxScrollOffset: () => 12,
+			},
+			tickScrollAnim: vi.fn(),
+		};
+
+		(InteractiveMode as any).prototype.addWheelScroll.call(fakeThis, "down");
+		expect(fakeThis.scrollTarget).toBe(0);
+		expect(fakeThis.tickScrollAnim).not.toHaveBeenCalled();
+
+		fakeThis.scrollTarget = 12;
+		fakeThis.transcriptScrollOffset = 12;
+		(InteractiveMode as any).prototype.addWheelScroll.call(fakeThis, "up");
+		expect(fakeThis.scrollTarget).toBe(12);
+		expect(fakeThis.tickScrollAnim).not.toHaveBeenCalled();
+	});
+
 	it("routes transcript keyboard and wheel input; non-wheel clicks pass through", () => {
 		const editor = { handleInput: vi.fn() };
 		const fakeThis: any = {
@@ -333,9 +370,9 @@ describe("interactive shell routing", () => {
 		);
 
 		expect(setResourceSections).toHaveBeenLastCalledWith([
-			{ label: "Copilot", value: "████ 25%" },
-			{ label: "Status", value: "Session started" },
-			{ label: "Skills", value: "review" },
+			{ label: "Copilot", value: "████ 25%", order: 30 },
+			{ label: "Status", value: "Session started", order: 40 },
+			{ label: "Skills", value: "review", order: 100 },
 		]);
 	});
 
@@ -382,15 +419,54 @@ describe("interactive shell routing", () => {
 		(InteractiveMode as any).prototype.showLoadedResources.call(fakeThis, { force: false });
 
 		expect(setSidebarSectionsForKey).toHaveBeenCalledWith(
-			"__builtin__",
+			"__builtin_context__",
+			[{ label: "Context File", value: "AGENTS.md" }],
+			{ order: 30 },
+		);
+		expect(setSidebarSectionsForKey).toHaveBeenCalledWith(
+			"__builtin_capabilities__",
 			[
-				{ label: "Context", value: "AGENTS.md" },
 				{ label: "Skills", value: "review" },
 				{ label: "Prompts", value: "/fix" },
 				{ label: "Extensions", value: "foo.ts" },
 			],
-			{ order: 100 },
+			{ order: 40 },
 		);
+	});
+
+	it("offers agentic vanity actions when vanity sidebar sections exist", async () => {
+		const selections = ["Deep-dive sidebar"];
+		const fakeThis: any = {
+			session: {
+				resourceLoader: { getSkills: () => ({ skills: [] }) },
+				getContextUsage: () => ({ percent: 18.2 }),
+				model: { provider: "github-copilot", id: "gpt-4.1" },
+			},
+			footerDataProvider: {
+				getGitBranch: () => "main",
+			},
+			sidebarContributions: new Map([
+				[
+					"vanity",
+					{
+						sections: [
+							{ label: "Session Health", value: "18.2% used · low pressure" },
+							{ label: "Next", value: "Run the scroll regression tests." },
+						],
+					},
+				],
+			]),
+			showExtensionSelector: vi.fn(async (_title: string, options: string[]) => {
+				const next = selections.shift();
+				expect(options).toContain("Deep-dive sidebar");
+				return next;
+			}),
+		};
+
+		const result = await (InteractiveMode as any).prototype.handleVanityCommand.call(fakeThis);
+		expect(result).toContain("Deep-dive the current sidebar state");
+		expect(result).toContain("Session Health: 18.2% used · low pressure");
+		expect(result).toContain("Next: Run the scroll regression tests.");
 	});
 });
 
@@ -424,6 +500,25 @@ describe("copilot budget sidebar helpers", () => {
 	it("builds degraded sidebar output when usage sync is unavailable", () => {
 		expect(buildCopilotSidebarSections(null)).toEqual([
 			{ label: "Copilot Budget", value: "sync unavailable", color: "warning" },
+		]);
+	});
+
+	it("builds compact budget sections for the sidebar", () => {
+		expect(
+			buildCopilotSidebarSections({
+				used: 372,
+				entitlement: 1000,
+				percent: 37,
+				unlimited: false,
+				overageCount: 0,
+				overagePermitted: false,
+				resetDate: "2026-05-01T00:00:00.000Z",
+				tier: "paid",
+			}),
+		).toEqual([
+			{ label: "Copilot Budget", value: "37%", color: "success" },
+			{ label: "Premium", value: "372 / 1000 requests" },
+			{ label: "Reset", value: "May 1" },
 		]);
 	});
 

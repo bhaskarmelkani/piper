@@ -64,9 +64,6 @@ export {
 	parseKey,
 	setKittyProtocolActive,
 } from "./keys.js";
-// Clack prompts integration (re-exports @clack/prompts + withClackFlow)
-export * as clack from "./prompts/index.js";
-export { withClackFlow } from "./prompts/index.js";
 // Input buffering for batch splitting
 export { StdinBuffer, type StdinBufferEventMap, type StdinBufferOptions } from "./stdin-buffer.js";
 // Terminal interface and implementations
