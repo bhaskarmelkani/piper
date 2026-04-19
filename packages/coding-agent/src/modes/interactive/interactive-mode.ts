@@ -129,7 +129,6 @@ import {
 	type ThemeColor,
 	theme,
 } from "./theme/theme.js";
-import { UserShellSession } from "./user-shell-session.js";
 
 /** Interface for components that can be expanded/collapsed */
 interface Expandable {
@@ -281,7 +280,6 @@ export class InteractiveMode {
 
 	// Track current bash execution component
 	private bashComponent: BashExecutionComponent | undefined = undefined;
-	private userShellSession: UserShellSession | undefined = undefined;
 
 	// Track pending bash components (shown in pending area, moved to chat on submit)
 	private pendingBashComponents: BashExecutionComponent[] = [];
@@ -947,30 +945,6 @@ export class InteractiveMode {
 		} else {
 			this.ui.terminal.setTitle(`${APP_SYMBOL} - ${cwdBasename}`);
 		}
-	}
-
-	private getUserShellSession(): UserShellSession {
-		this.userShellSession ??= new UserShellSession({
-			cwd: this.sessionManager.getCwd(),
-			onCwdChange: (cwd) => this.handleUserShellCwdChange(cwd),
-		});
-		return this.userShellSession;
-	}
-
-	private handleUserShellCwdChange(cwd: string): void {
-		const resolvedCwd = path.resolve(cwd);
-		if (resolvedCwd === this.sessionManager.getCwd()) {
-			return;
-		}
-
-		this.sessionManager.setCwd(resolvedCwd);
-		this.session.settingsManager.setCwd(resolvedCwd);
-		this.session.resourceLoader.setCwd?.(resolvedCwd);
-		this.footerDataProvider.setCwd(resolvedCwd);
-		this.updateTerminalTitle();
-		this.setupAutocomplete(this.fdPath ?? undefined);
-		this.showStatus(`Workspace changed to ${resolvedCwd}. Use /reload to refresh project resources.`);
-		this.ui.requestRender();
 	}
 
 	/**
@@ -2745,8 +2719,6 @@ export class InteractiveMode {
 				this.restoreQueuedMessagesToEditor({ abort: true });
 			} else if (this.session.isBashRunning) {
 				this.session.abortBash();
-			} else if (this.userShellSession?.isCommandRunning) {
-				this.userShellSession.abortActiveCommand();
 			} else if (this.isBashMode) {
 				this.editor.setText("");
 				this.isBashMode = false;
@@ -2976,7 +2948,7 @@ export class InteractiveMode {
 				const isExcluded = text.startsWith("!!");
 				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
 				if (command) {
-					if (this.session.isBashRunning || this.userShellSession?.isCommandRunning) {
+					if (this.session.isBashRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
 						this.editor.setText(text);
 						return;
@@ -3615,8 +3587,6 @@ export class InteractiveMode {
 		if (this.isShuttingDown) return;
 		this.isShuttingDown = true;
 		this.unregisterSignalHandlers();
-		await this.userShellSession?.dispose();
-		this.userShellSession = undefined;
 		await this.runtimeHost.dispose();
 
 		// Wait for any pending renders to complete
@@ -5616,26 +5586,16 @@ export class InteractiveMode {
 		this.ui.requestRender();
 
 		try {
-			const result = eventResult?.operations
-				? await this.session.executeBash(
-						command,
-						(chunk) => {
-							if (this.bashComponent) {
-								this.bashComponent.appendOutput(chunk);
-								this.ui.requestRender();
-							}
-						},
-						{
-							excludeFromContext,
-							operations: eventResult.operations,
-						},
-					)
-				: await this.getUserShellSession().execute(command, (chunk) => {
-						if (this.bashComponent) {
-							this.bashComponent.appendOutput(chunk);
-							this.ui.requestRender();
-						}
-					});
+			const result = await this.session.executeBash(
+				command,
+				(chunk) => {
+					if (this.bashComponent) {
+						this.bashComponent.appendOutput(chunk);
+						this.ui.requestRender();
+					}
+				},
+				{ excludeFromContext, operations: eventResult?.operations, userShell: !eventResult?.operations },
+			);
 
 			if (this.bashComponent) {
 				this.bashComponent.setComplete(
@@ -5645,9 +5605,7 @@ export class InteractiveMode {
 					result.fullOutputPath,
 				);
 			}
-			if (!eventResult?.operations) {
-				this.session.recordBashResult(command, result, { excludeFromContext });
-			}
+			this.session.recordBashResult(command, result, { excludeFromContext });
 		} catch (error) {
 			if (this.bashComponent) {
 				this.bashComponent.setComplete(undefined, false);
@@ -5683,8 +5641,6 @@ export class InteractiveMode {
 
 	stop(): void {
 		this.unregisterSignalHandlers();
-		void this.userShellSession?.dispose();
-		this.userShellSession = undefined;
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;

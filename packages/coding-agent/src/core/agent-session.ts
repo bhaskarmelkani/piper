@@ -2544,7 +2544,7 @@ export class AgentSession {
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean; operations?: BashOperations },
+		options?: { excludeFromContext?: boolean; operations?: BashOperations; userShell?: boolean },
 	): Promise<BashResult> {
 		this._bashAbortController = new AbortController();
 
@@ -2556,7 +2556,7 @@ export class AgentSession {
 			const result = await executeBashWithOperations(
 				resolvedCommand,
 				this.sessionManager.getCwd(),
-				options?.operations ?? createLocalBashOperations(),
+				options?.operations ?? createLocalBashOperations({ mode: options?.userShell ? "user" : "tool" }),
 				{
 					onChunk,
 					signal: this._bashAbortController.signal,

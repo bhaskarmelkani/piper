@@ -33,10 +33,6 @@ function removeLowerBorder(rendered: string[]): string[] {
 	return rendered;
 }
 
-function withBottomMargin(rendered: string[], width: number): string[] {
-	return [...rendered, " ".repeat(Math.max(0, width))];
-}
-
 function withGapBeforeAutocomplete(rendered: string[], width: number, autocompleteLineCount: number): string[] {
 	if (autocompleteLineCount <= 0 || rendered.length <= autocompleteLineCount) {
 		return rendered;
@@ -103,7 +99,7 @@ export class CustomEditor extends Editor {
 			if (this.isShowingAutocomplete()) {
 				return withGapBeforeAutocomplete(withoutLowerBorder, width, this.getAutocompleteLineCount(width));
 			}
-			return withBottomMargin(withoutLowerBorder, width);
+			return withoutLowerBorder;
 		}
 
 		const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
@@ -118,7 +114,7 @@ export class CustomEditor extends Editor {
 		const cursorPrefix = this.focused ? `${CURSOR_MARKER}\x1b[7m \x1b[0m` : "";
 
 		rendered[1] = `${leftPadding}${cursorPrefix}${truncatedPlaceholder}${trailingSpaces}${rightPadding}`;
-		return withBottomMargin(removeLowerBorder(rendered), width);
+		return removeLowerBorder(rendered);
 	}
 
 	handleInput(data: string): void {
