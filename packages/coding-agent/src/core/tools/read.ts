@@ -3,7 +3,7 @@ import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
 import { type Static, Type } from "@sinclair/typebox";
 import { constants } from "fs";
-import { access as fsAccess, readFile as fsReadFile } from "fs/promises";
+import { access as fsAccess, readFile as fsReadFile, stat as fsStat } from "fs/promises";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { getLanguageFromPath, highlightCode } from "../../modes/interactive/theme/theme.js";
 import { formatDimensionNote, resizeImage } from "../../utils/image-resize.js";
@@ -150,6 +150,20 @@ export function createReadToolDefinition(
 							// Check if file exists and is readable.
 							await ops.access(absolutePath);
 							if (aborted) return;
+							// Detect directories early and return a useful message instead of EISDIR.
+							const statResult = await fsStat(absolutePath).catch(() => null);
+							if (statResult?.isDirectory()) {
+								resolve({
+									content: [
+										{
+											type: "text",
+											text: `${absolutePath} is a directory, not a file. Use Glob to find files or Bash (ls) to list contents.`,
+										},
+									],
+									details: undefined,
+								});
+								return;
+							}
 							const mimeType = ops.detectImageMimeType ? await ops.detectImageMimeType(absolutePath) : undefined;
 							let content: (TextContent | ImageContent)[];
 							let details: ReadToolDetails | undefined;
