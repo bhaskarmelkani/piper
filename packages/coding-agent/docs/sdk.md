@@ -467,9 +467,9 @@ const { session } = await createAgentSession({ resourceLoader: loader });
 
 ```typescript
 import {
-  codingTools,   // read, bash, edit, write (default)
+  codingTools,   // read, bash, edit, write, search_code, symbols_overview (default)
   readOnlyTools, // read, grep, find, ls
-  readTool, bashTool, editTool, writeTool,
+  readTool, bashTool, editTool, writeTool, searchCodeTool, symbolsOverviewTool,
   grepTool, findTool, lsTool,
 } from "@mariozechner/pi-coding-agent";
 
@@ -490,12 +490,14 @@ const { session } = await createAgentSession({
 
 ```typescript
 import {
-  createCodingTools,    // Creates [read, bash, edit, write] for specific cwd
+  createCodingTools,    // Creates [read, bash, edit, write, search_code, symbols_overview] for specific cwd
   createReadOnlyTools,  // Creates [read, grep, find, ls] for specific cwd
   createReadTool,
   createBashTool,
   createEditTool,
   createWriteTool,
+  createSearchCodeTool,
+  createSymbolsOverviewTool,
   createGrepTool,
   createFindTool,
   createLsTool,
@@ -512,7 +514,7 @@ const { session } = await createAgentSession({
 // Or pick specific tools
 const { session } = await createAgentSession({
   cwd,
-  tools: [createReadTool(cwd), createBashTool(cwd), createGrepTool(cwd)],
+  tools: [createReadTool(cwd), createBashTool(cwd), createSearchCodeTool(cwd)],
 });
 ```
 

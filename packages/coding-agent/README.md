@@ -60,7 +60,7 @@ pi
 /login  # Then select provider
 ```
 
-Then just talk to pi. By default, pi gives the model four tools: `read`, `write`, `edit`, and `bash`. The model uses these to fulfill your requests. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
+Then just talk to pi. By default, pi gives the model six tools: `read`, `bash`, `edit`, `write`, `search_code`, and `symbols_overview`. Use `search_code` for keyword, regex, filename, or AST discovery, then `symbols_overview` to route reads before opening large files. `search_code` is structural and text-based search only. It does not add background indexing, semantic retrieval, or a graph engine. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -486,10 +486,13 @@ cat README.md | pi -p "Summarize this text"
 
 | Option | Description |
 |--------|-------------|
-| `--tools <list>` | Enable specific built-in tools (default: `read,bash,edit,write`) |
+| `--tools <list>` | Enable specific built-in tools (default: `read,bash,edit,write,search_code,symbols_overview`) |
 | `--no-tools` | Disable all built-in tools (extension tools still work) |
 
-Available built-in tools: `read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`
+Available built-in tools: `read`, `bash`, `edit`, `write`, `search_code`, `symbols_overview`, `grep`, `find`, `ls`
+
+- `search_code` searches code by keyword, regex, filename, or AST pattern and returns compact grouped matches. AST mode is structural only and does not provide semantic retrieval, background indexing, or graph analysis.
+- `symbols_overview` summarizes top-level symbols for one file or a folder so you can decide what to open next before using `read`.
 
 ### Resource Options
 
