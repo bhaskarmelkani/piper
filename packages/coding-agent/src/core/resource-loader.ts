@@ -35,6 +35,7 @@ export interface ResourceLoader {
 	getSystemPrompt(): string | undefined;
 	getAppendSystemPrompt(): string[];
 	extendResources(paths: ResourceExtensionPaths): void;
+	setCwd?(cwd: string): void;
 	reload(): Promise<void>;
 }
 
@@ -276,6 +277,20 @@ export class DefaultResourceLoader implements ResourceLoader {
 
 	getAppendSystemPrompt(): string[] {
 		return this.appendSystemPrompt;
+	}
+
+	setCwd(cwd: string): void {
+		const resolvedCwd = resolve(cwd);
+		if (resolvedCwd === this.cwd) {
+			return;
+		}
+
+		this.cwd = resolvedCwd;
+		this.packageManager = new DefaultPackageManager({
+			cwd: this.cwd,
+			agentDir: this.agentDir,
+			settingsManager: this.settingsManager,
+		});
 	}
 
 	extendResources(paths: ResourceExtensionPaths): void {

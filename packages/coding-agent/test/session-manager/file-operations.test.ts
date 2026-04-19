@@ -206,3 +206,32 @@ describe("SessionManager.setSessionFile with corrupted files", () => {
 		expect(sm2.getHeader()?.type).toBe("session");
 	});
 });
+
+describe("SessionManager.setCwd", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = join(tmpdir(), `session-test-${Date.now()}`);
+		mkdirSync(tempDir, { recursive: true });
+	});
+
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
+
+	it("updates the in-memory cwd and persisted session header", () => {
+		const sessionManager = SessionManager.create(join(tempDir, "project-a"), tempDir);
+		const sessionFile = sessionManager.getSessionFile();
+
+		expect(sessionFile).toBeTruthy();
+
+		sessionManager.setCwd(join(tempDir, "project-b"));
+
+		expect(sessionManager.getCwd()).toBe(join(tempDir, "project-b"));
+
+		const fileContent = readFileSync(sessionFile!, "utf-8").trim();
+		const header = JSON.parse(fileContent) as { cwd: string; type: string };
+		expect(header.type).toBe("session");
+		expect(header.cwd).toBe(join(tempDir, "project-b"));
+	});
+});

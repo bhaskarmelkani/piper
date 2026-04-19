@@ -14,6 +14,7 @@ import {
 	getShellConfig,
 	getShellEnv,
 	killProcessTree,
+	type ShellExecutionMode,
 	trackDetachedChildPid,
 	untrackDetachedChildPid,
 } from "../../utils/shell.js";
@@ -72,11 +73,11 @@ export interface BashOperations {
  * This is useful for extensions that intercept user_bash and still want pi's
  * standard local shell behavior while wrapping or rewriting commands.
  */
-export function createLocalBashOperations(): BashOperations {
+export function createLocalBashOperations(options?: { mode?: ShellExecutionMode }): BashOperations {
 	return {
 		exec: (command, cwd, { onData, signal, timeout, env }) => {
 			return new Promise((resolve, reject) => {
-				const { shell, args } = getShellConfig();
+				const { shell, args } = getShellConfig(options?.mode ?? "tool");
 				if (!existsSync(cwd)) {
 					reject(new Error(`Working directory does not exist: ${cwd}\nCannot execute bash commands.`));
 					return;
