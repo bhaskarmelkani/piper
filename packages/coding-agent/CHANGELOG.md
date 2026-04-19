@@ -2,22 +2,28 @@
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-04-19
+
 ### Changed
 
-- Changed pico interactive mode to use a fixed shell layout with a persistent bottom dock, a responsive right sidebar, and an independently scrollable transcript pane.
+- Changed piper interactive mode to use a fixed shell layout with a persistent bottom dock, a responsive right sidebar, and an independently scrollable transcript pane.
 - Changed sidebar extension sections to support keyed composition with deterministic ordering, so built-in resources and extension-provided sidebar content can coexist.
+- Changed terminal mouse mode from SGR button capture (?1000h) to alternate scroll mode (?1007h), enabling native terminal text selection without holding Shift while keeping scroll wheel functional.
+- Changed all tooling scripts (version bumping, publishing, browser smoke check) to use Bun instead of Node.js/npm, completing the Bun-only runtime setup.
+- Changed update notification to check piper's own npm package (`piper-ai`) and link to piper's changelog, so false "update available" messages from the upstream `@mariozechner/pi-coding-agent` package no longer appear.
 
 ### Fixed
 
 - Fixed in-session selectors, prompts, and login/provider flows to render inside the bottom dock instead of pausing the TUI with a full-terminal Clack takeover.
 - Fixed interactive edit diff rendering to use the built-in renderer again instead of requiring external `delta`.
-- Fixed transcript wheel and trackpad scrolling in pico interactive mode by enabling explicit alternate-screen mouse reporting instead of letting wheel input fall through to the docked composer.
 - Fixed sidebar context signaling to use consistent semantic thresholds in both the right sidebar and footer.
+- Fixed scroll wheel routing to use Up/Down cursor key events from alternate scroll mode, with smooth lerp animation preserved.
 
 ### Added
 
 - Added semantic sidebar rendering for thinking and context state, including level-aware thinking colors and a compact context progress bar.
 - Added `examples/extensions/copilot-budget.ts`, a keyed sidebar example extension that shows GitHub Copilot premium request usage.
+- Added `scripts/bump-version.mjs` to replace `npm version -ws` for lockstep version bumping across all workspace packages.
 
 ## [0.67.68] - 2026-04-17
 
