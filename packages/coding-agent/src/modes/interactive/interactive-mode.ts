@@ -221,6 +221,7 @@ export class InteractiveMode {
 	private interactionContainer: Container;
 	private dockTransientContainer: Container;
 	private dockHintsText: Text;
+	private dockInteractionActive = false;
 	private dockHints: Container;
 	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
@@ -824,8 +825,9 @@ export class InteractiveMode {
 		}
 
 		// Alternate scroll mode (?1007h) delivers scroll wheel events as Up/Down cursor keys.
-		// Route them to transcript scroll when the default editor is active and empty.
-		if (this.editor === this.defaultEditor && this.defaultEditor.getText() === "") {
+		// Route them to transcript scroll when the default editor is active, empty, and no selector
+		// overlay is shown (dock interactions capture up/down for their own navigation).
+		if (this.editor === this.defaultEditor && this.defaultEditor.getText() === "" && !this.dockInteractionActive) {
 			if (this.keybindings.matches(data, "tui.editor.cursorUp")) {
 				this.addWheelScroll("up");
 				return { consume: true };
@@ -902,6 +904,7 @@ export class InteractiveMode {
 		this.interactionContainer.clear();
 		this.interactionContainer.addChild(component);
 		this.dockComponent.setHideEditor(true);
+		this.dockInteractionActive = true;
 		this.ui.setFocus(focus);
 		this.ui.requestRender();
 	}
@@ -909,6 +912,7 @@ export class InteractiveMode {
 	private restoreComposerFocus(): void {
 		this.clearDockInteraction();
 		this.dockComponent.setHideEditor(false);
+		this.dockInteractionActive = false;
 		this.ui.setFocus(this.editor as Component);
 		this.ui.requestRender();
 	}
