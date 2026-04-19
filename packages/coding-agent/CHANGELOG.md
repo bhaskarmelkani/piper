@@ -2,6 +2,26 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-04-19
+
+### Added
+
+- Added `/skills` command for intelligent skill management. Users can now enable/disable skills per-project to reduce context bloat. Disabled skills are hidden from the system prompt (saving context tokens) but remain invokable via `/skill:name`. Selection persists to project `.pi/settings.json`.
+- Added skill selector component with fuzzy search, checkbox list, detail view, and keybinding support. Includes `Ctrl+A` to enable all and `Ctrl+X` to disable all.
+- Added skill count in sidebar showing active vs. total skills (e.g., "Skills: 30/60 active").
+- Added GitHub Copilot model multipliers to the model selector. Multiplier values (e.g. `x0`, `x0.33`, `x1`, `x3`) are shown next to each model name so users can see the premium request cost at a glance. The static table is sourced from the [GitHub Copilot billing docs](https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers) and is updated at build time via `generate-models`. The live Copilot API is used as the authoritative source when available; the static table is the fallback.
+- Added grouping and sorting in the model selector. Models are sorted by provider then family (e.g. `claude-opus`, `claude-sonnet`, `gpt-5`) and a dim group header appears between families when no search filter is active.
+- Added spacing between sidebar sections. Built-in fields (Model, Thinking, Workspace, Git, Status) and extension-provided sections are now separated by blank lines for easier scanning.
+
+### Changed
+
+- Changed cursor character from space to π symbol in the interactive editor when focused and empty, matching the piper visual identity.
+
+### Fixed
+
+- Fixed the thinking selector to remove inconsistent bottom border for UI consistency.
+- Fixed the interactive composer to show a dim placeholder when empty and use a padded default left margin instead of rendering flush against the dock border.
+
 ## [0.1.0] - 2026-04-19 - 2026-04-19
 
 ### Changed

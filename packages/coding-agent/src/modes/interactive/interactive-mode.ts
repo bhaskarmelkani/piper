@@ -42,6 +42,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { spawn, spawnSync } from "child_process";
+import { isValidThinkingLevel } from "../../cli/args.js";
 import {
 	APP_NAME,
 	APP_SYMBOL,
@@ -107,6 +108,8 @@ import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { ShellDockComponent } from "./components/shell-dock.js";
 import { ShellSidebarComponent } from "./components/shell-sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
+import { SkillSelectorComponent } from "./components/skill-selector.js";
+import { ThinkingSelectorComponent } from "./components/thinking-selector.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
@@ -169,6 +172,8 @@ type SidebarDisplaySection = ExtensionSidebarSection & { order?: number };
 
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party usage now draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
+const DEFAULT_COMPOSER_PLACEHOLDER = "Ask piper, add @files, or use /commands";
+const SHELL_LEFT_INSET = 1;
 
 function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {
 	return typeof apiKey === "string" && apiKey.startsWith("sk-ant-oat");
@@ -203,6 +208,8 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
+	/** Optional note rendered in the TUI header (e.g. model scope) */
+	startupNote?: string;
 }
 
 export class InteractiveMode {
@@ -221,6 +228,7 @@ export class InteractiveMode {
 	private interactionContainer: Container;
 	private dockTransientContainer: Container;
 	private dockHintsText: Text;
+	private dockInteractionActive = false;
 	private dockHints: Container;
 	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
@@ -380,7 +388,7 @@ export class InteractiveMode {
 		this.widgetContainerBelow = new Container();
 		this.interactionContainer = new Container();
 		this.dockTransientContainer = new Container();
-		this.dockHintsText = new Text("", 0, 0);
+		this.dockHintsText = new Text("", SHELL_LEFT_INSET, 0);
 		this.dockHints = new Container();
 		this.dockHints.addChild(new Spacer(1));
 		this.dockHints.addChild(this.dockHintsText);
@@ -397,6 +405,8 @@ export class InteractiveMode {
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
+			placeholder: DEFAULT_COMPOSER_PLACEHOLDER,
+			placeholderStyle: (text: string) => theme.fg("dim", text),
 		});
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
@@ -600,11 +610,6 @@ export class InteractiveMode {
 		// Load changelog (only show new entries, skip for resumed sessions)
 		this.changelogMarkdown = this.getChangelogForDisplay();
 
-		// Ensure fd and rg are available (downloads if missing, adds to PATH via getBinDir)
-		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
-		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
-		this.fdPath = fdPath;
-
 		// Add fixed shell layout as the single top-level child of the TUI.
 		this.ui.addChild(this.rootLayout);
 
@@ -623,11 +628,12 @@ export class InteractiveMode {
 				"dim",
 				`piper can explain its own features and look up its docs. Ask it how to use or extend piper.`,
 			);
+			const note = this.options.startupNote ? `\n${theme.fg("dim", this.options.startupNote)}` : "";
 			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${onboarding}`,
-				() => `${logo}\n${onboarding}`,
+				() => `${logo}\n${onboarding}${note}`,
+				() => `${logo}\n${onboarding}${note}`,
 				this.getStartupExpansionState(),
-				1,
+				SHELL_LEFT_INSET,
 				0,
 			);
 
@@ -642,6 +648,7 @@ export class InteractiveMode {
 		}
 
 		this.transcriptContainer.addChild(this.chatContainer);
+		this.transcriptContainer.addChild(new Spacer(1));
 		this.dockTransientContainer.addChild(this.pendingMessagesContainer);
 		this.dockTransientContainer.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
@@ -656,6 +663,12 @@ export class InteractiveMode {
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
 		this.isInitialized = true;
+
+		// Resolve fd/rg in the background — not needed until the user invokes file search or grep.
+		// Use silent mode to suppress download messages that would corrupt the TUI output.
+		Promise.all([ensureTool("fd", true), ensureTool("rg", true)]).then(([fdPath]) => {
+			this.fdPath = fdPath;
+		});
 
 		// Initialize extensions first so resources are shown before messages
 		await this.bindCurrentSessionExtensions();
@@ -824,8 +837,9 @@ export class InteractiveMode {
 		}
 
 		// Alternate scroll mode (?1007h) delivers scroll wheel events as Up/Down cursor keys.
-		// Route them to transcript scroll when the default editor is active and empty.
-		if (this.editor === this.defaultEditor && this.defaultEditor.getText() === "") {
+		// Route them to transcript scroll when the default editor is active, empty, and no selector
+		// overlay is shown (dock interactions capture up/down for their own navigation).
+		if (this.editor === this.defaultEditor && this.defaultEditor.getText() === "" && !this.dockInteractionActive) {
 			if (this.keybindings.matches(data, "tui.editor.cursorUp")) {
 				this.addWheelScroll("up");
 				return { consume: true };
@@ -902,6 +916,7 @@ export class InteractiveMode {
 		this.interactionContainer.clear();
 		this.interactionContainer.addChild(component);
 		this.dockComponent.setHideEditor(true);
+		this.dockInteractionActive = true;
 		this.ui.setFocus(focus);
 		this.ui.requestRender();
 	}
@@ -909,6 +924,7 @@ export class InteractiveMode {
 	private restoreComposerFocus(): void {
 		this.clearDockInteraction();
 		this.dockComponent.setHideEditor(false);
+		this.dockInteractionActive = false;
 		this.ui.setFocus(this.editor as Component);
 		this.ui.requestRender();
 	}
@@ -1592,7 +1608,7 @@ export class InteractiveMode {
 				() => `${sectionHeader(name, color)}\n${collapsedBody}`,
 				() => `${sectionHeader(name, color)}\n${expandedBody}`,
 				this.getStartupExpansionState(),
-				0,
+				SHELL_LEFT_INSET,
 				0,
 			);
 			this.chatContainer.addChild(section);
@@ -1663,19 +1679,25 @@ export class InteractiveMode {
 
 			const skills = skillsResult.skills;
 			if (skills.length > 0) {
+				const disabledSkillSet = new Set(this.settingsManager.getDisabledSkills());
+				const activeSkills = skills.filter((s) => !disabledSkillSet.has(s.name));
+				const displaySkills = activeSkills.length < skills.length ? activeSkills : skills;
 				const groups = this.buildScopeGroups(
-					skills.map((skill) => ({ path: skill.filePath, sourceInfo: skill.sourceInfo })),
+					displaySkills.map((skill) => ({ path: skill.filePath, sourceInfo: skill.sourceInfo })),
 				);
 				const skillList = this.formatScopeGroups(groups, {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const skillSummary = formatCompactSummary(skills.map((skill) => skill.name));
+				const skillSummary =
+					activeSkills.length < skills.length
+						? `${formatCompactSummary(activeSkills.map((s) => s.name))} (${activeSkills.length}/${skills.length} active)`
+						: formatCompactSummary(skills.map((skill) => skill.name));
 				if (updateSidebar) {
 					capabilitySidebarSections.push({ label: "Skills", value: skillSummary });
 				}
 				if (!updateSidebar) {
-					addLoadedSection("Skills", formatCompactList(skills.map((skill) => skill.name)), skillList);
+					addLoadedSection("Skills", formatCompactList(displaySkills.map((skill) => skill.name)), skillList);
 				}
 			}
 
@@ -1775,9 +1797,13 @@ export class InteractiveMode {
 			if (skillDiagnostics.length > 0) {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
-					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Skill issues]")}\n${warningLines}`, 0, 0));
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Skill issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
+					);
 				} else {
-					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Skills", skillDiagnostics), 0, 0));
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Skills", skillDiagnostics), SHELL_LEFT_INSET, 0),
+					);
 				}
 			}
 
@@ -1786,10 +1812,12 @@ export class InteractiveMode {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
 					this.chatContainer.addChild(
-						new Text(`${theme.fg("warning", "[Prompt issues]")}\n${warningLines}`, 0, 0),
+						new Text(`${theme.fg("warning", "[Prompt issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
 					);
 				} else {
-					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Prompts", promptDiagnostics), 0, 0));
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Prompts", promptDiagnostics), SHELL_LEFT_INSET, 0),
+					);
 				}
 			}
 
@@ -1812,11 +1840,11 @@ export class InteractiveMode {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
 					this.chatContainer.addChild(
-						new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
+						new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
 					);
 				} else {
 					this.chatContainer.addChild(
-						new Text(this.formatDiagnosticsCompact("Extensions", extensionDiagnostics), 0, 0),
+						new Text(this.formatDiagnosticsCompact("Extensions", extensionDiagnostics), SHELL_LEFT_INSET, 0),
 					);
 				}
 			}
@@ -1825,9 +1853,13 @@ export class InteractiveMode {
 			if (themeDiagnostics.length > 0) {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
-					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Theme issues]")}\n${warningLines}`, 0, 0));
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Theme issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
+					);
 				} else {
-					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Themes", themeDiagnostics), 0, 0));
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Themes", themeDiagnostics), SHELL_LEFT_INSET, 0),
+					);
 				}
 			}
 
@@ -2734,6 +2766,7 @@ export class InteractiveMode {
 		this.ui.onDebug = () => this.handleDebugCommand();
 		this.ui.addInputListener((data) => this.handleTranscriptInput(data));
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
+		this.defaultEditor.onAction("app.skills.select", () => this.showSkillSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
 		this.defaultEditor.onAction("app.editor.external", () => this.openExternalEditor());
@@ -2801,6 +2834,18 @@ export class InteractiveMode {
 				const searchTerm = text.startsWith("/model ") ? text.slice(7).trim() : undefined;
 				this.editor.setText("");
 				await this.handleModelCommand(searchTerm);
+				return;
+			}
+			if (text === "/skills" || text.startsWith("/skills ")) {
+				const searchTerm = text.startsWith("/skills ") ? text.slice(8).trim() : undefined;
+				this.editor.setText("");
+				this.showSkillSelector(searchTerm);
+				return;
+			}
+			if (text === "/thinking" || text.startsWith("/thinking ")) {
+				const level = text.startsWith("/thinking ") ? text.slice(10).trim() : undefined;
+				this.editor.setText("");
+				this.handleThinkingCommand(level);
 				return;
 			}
 			if (text === "/export" || text.startsWith("/export ")) {
@@ -4207,6 +4252,56 @@ export class InteractiveMode {
 		});
 	}
 
+	private handleThinkingCommand(levelText?: string): void {
+		if (!levelText) {
+			this.showThinkingSelector();
+			return;
+		}
+
+		if (!isValidThinkingLevel(levelText)) {
+			this.showError(`Invalid thinking level "${levelText}". Valid values: off, minimal, low, medium, high, xhigh`);
+			return;
+		}
+
+		const availableLevels = this.session.getAvailableThinkingLevels();
+		if (!availableLevels.includes(levelText)) {
+			if (availableLevels.length === 1 && availableLevels[0] === "off") {
+				this.showStatus("Current model does not support thinking");
+			} else {
+				this.showError(
+					`Thinking level "${levelText}" is not available for the current model. Available: ${availableLevels.join(", ")}`,
+				);
+			}
+			return;
+		}
+
+		this.session.setThinkingLevel(levelText);
+		this.footer.invalidate();
+		this.updateEditorBorderColor();
+		this.showStatus(`Thinking level: ${levelText}`);
+	}
+
+	private showThinkingSelector(): void {
+		this.showSelector((done) => {
+			const selector = new ThinkingSelectorComponent(
+				this.session.thinkingLevel,
+				this.session.getAvailableThinkingLevels(),
+				(level) => {
+					this.session.setThinkingLevel(level);
+					this.footer.invalidate();
+					this.updateEditorBorderColor();
+					done();
+					this.showStatus(`Thinking level: ${level}`);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector.getSelectList() };
+		});
+	}
+
 	private async handleModelCommand(searchTerm?: string): Promise<void> {
 		if (!searchTerm) {
 			this.showModelSelector();
@@ -4312,6 +4407,33 @@ export class InteractiveMode {
 					this.ui.requestRender();
 				},
 				initialSearchInput,
+			);
+			return { component: selector, focus: selector };
+		});
+	}
+
+	private showSkillSelector(initialSearch?: string): void {
+		const allSkills = this.session.resourceLoader.getSkills().skills;
+		if (allSkills.length === 0) {
+			this.showStatus("No skills loaded");
+			return;
+		}
+		this.showSelector((done) => {
+			const disabled = this.settingsManager.getDisabledSkills();
+			const selector = new SkillSelectorComponent(
+				allSkills,
+				disabled,
+				(newDisabled) => {
+					this.settingsManager.setProjectDisabledSkills(newDisabled);
+					this.session.rebuildSystemPrompt();
+					this.showLoadedResources({ force: false });
+					this.showStatus(`Skills: ${allSkills.length - newDisabled.length}/${allSkills.length} active`);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+				initialSearch,
 			);
 			return { component: selector, focus: selector };
 		});
@@ -5518,7 +5640,7 @@ export class InteractiveMode {
 						this.ui.requestRender();
 					}
 				},
-				{ excludeFromContext, operations: eventResult?.operations },
+				{ excludeFromContext, operations: eventResult?.operations, userShell: !eventResult?.operations },
 			);
 
 			if (this.bashComponent) {
@@ -5529,6 +5651,7 @@ export class InteractiveMode {
 					result.fullOutputPath,
 				);
 			}
+			this.session.recordBashResult(command, result, { excludeFromContext });
 		} catch (error) {
 			if (this.bashComponent) {
 				this.bashComponent.setComplete(undefined, false);

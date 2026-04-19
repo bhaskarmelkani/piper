@@ -3,6 +3,7 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/p
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ExtensionSidebarSection } from "../../../core/extensions/types.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
+import { COPILOT_MULTIPLIERS } from "../../../utils/copilot-model-policies.js";
 import { type ThemeColor, theme } from "../theme/theme.js";
 import {
 	formatContextSummary,
@@ -118,6 +119,20 @@ function formatWorkspaceName(cwd: string): string {
 	return parts.at(-1) ?? cwd;
 }
 
+function getModelProviderBadge(model: AgentSession["model"]): string {
+	if (!model) {
+		return theme.fg("muted", "unresolved");
+	}
+
+	if (model.provider !== "github-copilot") {
+		return theme.fg("dim", `(${model.provider})`);
+	}
+
+	const multiplier = COPILOT_MULTIPLIERS[model.id];
+	const multiplierBadge = multiplier !== undefined ? ` · x${multiplier}` : "";
+	return theme.fg("dim", `(${model.provider}${multiplierBadge})`);
+}
+
 export class ShellSidebarComponent implements Component {
 	private height = 0;
 	private resourceSections: SidebarDisplaySection[] = [];
@@ -149,6 +164,7 @@ export class ShellSidebarComponent implements Component {
 		const contentWidth = Math.max(1, width - 2);
 		const border = theme.fg("muted", "│");
 		const blank = `${border} ${" ".repeat(contentWidth)}`;
+		const borderlessBlank = " ".repeat(width);
 		const divider = `${border} ${theme.fg("borderMuted", "─".repeat(contentWidth))}`;
 		const wrapLine = (text: string): string[] => {
 			const wrapped = wrapTextWithAnsi(text, contentWidth);
@@ -180,19 +196,20 @@ export class ShellSidebarComponent implements Component {
 			}
 			return lines;
 		};
-		const renderExtensionSections = (sections: SidebarDisplaySection[]): string[] =>
-			sections.flatMap((section) => {
+		const renderExtensionSections = (sections: SidebarDisplaySection[]): string[] => {
+			const rendered: string[][] = [];
+			for (const section of sections) {
 				const label = normalizeSectionText(section.label);
 				const value = truncateSectionValue(section.value);
 				if (!label || !value) {
-					return [];
+					continue;
 				}
 				const tone = resolveSidebarColor(section.color);
 				const percent = parsePercentText(value);
 				if (percent !== null) {
 					const meterTone = tone ?? getContextTone(percent);
 					const meterWidth = Math.max(8, Math.min(18, contentWidth - 8));
-					return [
+					rendered.push([
 						...wrapLine(theme.fg("muted", label)),
 						...wrapLine(
 							`${theme.fg(meterTone, renderCompactMeter(percent, meterWidth))} ${theme.fg(
@@ -200,11 +217,19 @@ export class ShellSidebarComponent implements Component {
 								formatPercent(percent),
 							)}`,
 						),
-					];
+					]);
+				} else {
+					const coloredValue = tone ? theme.fg(tone, value) : theme.fg("text", value);
+					rendered.push(labeledSection(label, coloredValue));
 				}
-				const coloredValue = tone ? theme.fg(tone, value) : theme.fg("text", value);
-				return labeledSection(label, coloredValue);
-			});
+			}
+			const result: string[] = [];
+			for (let i = 0; i < rendered.length; i++) {
+				if (i > 0) result.push(blank);
+				result.push(...rendered[i]);
+			}
+			return result;
+		};
 
 		const orderedSections = [...this.resourceSections].sort(
 			(a, b) =>
@@ -224,13 +249,12 @@ export class ShellSidebarComponent implements Component {
 		const headerGroup: string[] = [];
 		if (sessionTitle) {
 			headerGroup.push(...wrapLine(theme.bold(theme.fg("accent", sessionTitle))));
+			headerGroup.push(blank);
 		}
 
 		const model = this.session.model;
 		if (model) {
-			headerGroup.push(
-				...labeledSection("Model", `${theme.fg("text", model.id)} ${theme.fg("dim", `(${model.provider})`)}`),
-			);
+			headerGroup.push(...labeledSection("Model", `${theme.fg("text", model.id)} ${getModelProviderBadge(model)}`));
 		} else {
 			headerGroup.push(...labeledSection("Model", theme.fg("muted", "unresolved")));
 		}
@@ -238,6 +262,7 @@ export class ShellSidebarComponent implements Component {
 		const thinkingLevel = this.session.thinkingLevel;
 		const thinkingTone = model?.reasoning ? getThinkingTone(thinkingLevel) : "muted";
 		const thinkingValue = model?.reasoning ? thinkingLevel : "unsupported";
+		headerGroup.push(blank);
 		headerGroup.push(...labeledSection("Thinking", theme.fg(thinkingTone, thinkingValue)));
 		topGroups.push(headerGroup);
 
@@ -282,7 +307,11 @@ export class ShellSidebarComponent implements Component {
 		} else if (contextUsage) {
 			contextGroup.push(...compactSection("Context", theme.fg("muted", formatContextSummary(contextUsage))));
 		}
-		contextGroup.push(...renderExtensionSections(contextSections));
+		const renderedContextSections = renderExtensionSections(contextSections);
+		if (contextGroup.length > 0 && renderedContextSections.length > 0) {
+			contextGroup.push(blank);
+		}
+		contextGroup.push(...renderedContextSections);
 		if (contextGroup.length > 0) {
 			topGroups.push(contextGroup);
 		}
@@ -299,6 +328,7 @@ export class ShellSidebarComponent implements Component {
 
 		const branch = this.footerData.getGitBranch();
 		if (branch) {
+			workspaceGroup.push(blank);
 			workspaceGroup.push(...labeledSection("Git", theme.fg("text", branch)));
 		}
 
@@ -306,21 +336,48 @@ export class ShellSidebarComponent implements Component {
 			.map((status) => status.trim())
 			.filter(Boolean);
 		const statusValue = statuses.length > 0 ? truncateSectionValue(statuses.join(", ")) : "ready";
+		workspaceGroup.push(blank);
 		workspaceGroup.push(
 			...labeledSection("Status", theme.fg(statuses.length > 0 ? "warning" : "success", statusValue)),
 		);
-		workspaceGroup.push(...renderExtensionSections(workspaceSections));
-		workspaceGroup.push(...renderExtensionSections(overflowSections));
+		const workspaceExtSections = renderExtensionSections([...workspaceSections, ...overflowSections]);
+		if (workspaceExtSections.length > 0) {
+			workspaceGroup.push(blank);
+			workspaceGroup.push(...workspaceExtSections);
+		}
 		bottomGroups.push(workspaceGroup);
 
 		const topLines = joinGroups(topGroups);
 		const bottomLines = joinGroups(bottomGroups);
-
 		const maxBottomHeight = Math.max(0, this.height - topLines.length);
 		const visibleBottomLines = bottomLines.slice(Math.max(0, bottomLines.length - maxBottomHeight));
-		const spacerHeight = Math.max(0, this.height - topLines.length - visibleBottomLines.length);
+		let spacerHeight = Math.max(0, this.height - topLines.length - visibleBottomLines.length);
+		const footerSectionPrefix: string[] = [];
+		const footerPadding: string[] = [];
 
-		const lines = [...topLines, ...Array.from({ length: spacerHeight }, () => blank), ...visibleBottomLines];
+		if (bottomLines.length > 0 && spacerHeight > 0) {
+			footerPadding.push(borderlessBlank);
+			spacerHeight -= 1;
+		}
+		if (topLines.length > 0 && bottomLines.length > 0 && spacerHeight > 0) {
+			footerSectionPrefix.push(divider);
+			spacerHeight -= 1;
+			if (spacerHeight > 0) {
+				footerSectionPrefix.push(blank);
+				spacerHeight -= 1;
+			}
+		} else if (bottomLines.length > 0 && spacerHeight > 0) {
+			footerSectionPrefix.push(blank);
+			spacerHeight -= 1;
+		}
+
+		const lines = [
+			...topLines,
+			...Array.from({ length: spacerHeight }, () => blank),
+			...footerSectionPrefix,
+			...visibleBottomLines,
+			...footerPadding,
+		];
 		return lines.slice(0, this.height);
 	}
 }

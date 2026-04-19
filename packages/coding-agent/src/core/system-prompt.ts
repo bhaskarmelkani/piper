@@ -22,6 +22,8 @@ export interface BuildSystemPromptOptions {
 	contextFiles?: Array<{ path: string; content: string }>;
 	/** Pre-loaded skills. */
 	skills?: Skill[];
+	/** Skill names to hide from prompt (still invokable via /skill:name). */
+	disabledSkills?: string[];
 }
 
 /** Build the system prompt with tools, guidelines, and context */
@@ -35,6 +37,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		cwd,
 		contextFiles: providedContextFiles,
 		skills: providedSkills,
+		disabledSkills,
 	} = options;
 	const resolvedCwd = cwd ?? process.cwd();
 	const promptCwd = resolvedCwd.replace(/\\/g, "/");
@@ -69,7 +72,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		// Append skills section (only if read tool is available)
 		const customPromptHasRead = !selectedTools || selectedTools.includes("read");
 		if (customPromptHasRead && skills.length > 0) {
-			prompt += formatSkillsForPrompt(skills);
+			prompt += formatSkillsForPrompt(skills, disabledSkills);
 		}
 
 		// Add date and working directory last
@@ -161,7 +164,7 @@ ${APP_NAME} documentation (read only when the user asks about ${APP_NAME} itself
 
 	// Append skills section (only if read tool is available)
 	if (hasRead && skills.length > 0) {
-		prompt += formatSkillsForPrompt(skills);
+		prompt += formatSkillsForPrompt(skills, disabledSkills);
 	}
 
 	// Add date and working directory last

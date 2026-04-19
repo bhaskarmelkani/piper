@@ -4,7 +4,38 @@ import { spawn, spawnSync } from "child_process";
 import { getBinDir, getSettingsPath } from "../config.js";
 import { SettingsManager } from "../core/settings-manager.js";
 
-let cachedShellConfig: { shell: string; args: string[] } | null = null;
+export type ShellExecutionMode = "tool" | "user";
+
+let cachedShellConfigs = new Map<ShellExecutionMode, { shell: string; args: string[] }>();
+
+function getShellBasename(shellPath: string): string {
+	const normalized = shellPath.replace(/\\/g, "/");
+	return normalized.split("/").pop()?.toLowerCase() ?? normalized.toLowerCase();
+}
+
+export function getShellArgs(shellPath: string, mode: ShellExecutionMode): string[] {
+	if (mode === "tool") {
+		return ["-c"];
+	}
+
+	const shell = getShellBasename(shellPath);
+	if (
+		shell === "bash" ||
+		shell === "zsh" ||
+		shell === "fish" ||
+		shell === "ksh" ||
+		shell === "mksh" ||
+		shell === "pdksh" ||
+		shell === "csh" ||
+		shell === "tcsh" ||
+		shell === "nu" ||
+		shell === "nushell"
+	) {
+		return ["-i", "-c"];
+	}
+
+	return ["-c"];
+}
 
 /**
  * Find bash executable on PATH (cross-platform)
@@ -44,13 +75,20 @@ function findBashOnPath(): string | null {
 /**
  * Get shell configuration based on platform.
  * Resolution order:
+ * Tool mode:
  * 1. User-specified shellPath in settings.json
  * 2. On Windows: Git Bash in known locations, then bash on PATH
  * 3. On Unix: /bin/bash, then bash on PATH, then fallback to sh
+ *
+ * User mode:
+ * 1. User-specified shellPath in settings.json
+ * 2. On Unix: $SHELL when it exists
+ * 3. Fall back to tool-mode resolution
  */
-export function getShellConfig(): { shell: string; args: string[] } {
-	if (cachedShellConfig) {
-		return cachedShellConfig;
+export function getShellConfig(mode: ShellExecutionMode = "tool"): { shell: string; args: string[] } {
+	const cached = cachedShellConfigs.get(mode);
+	if (cached) {
+		return cached;
 	}
 
 	const settings = SettingsManager.create();
@@ -59,12 +97,22 @@ export function getShellConfig(): { shell: string; args: string[] } {
 	// 1. Check user-specified shell path
 	if (customShellPath) {
 		if (existsSync(customShellPath)) {
-			cachedShellConfig = { shell: customShellPath, args: ["-c"] };
-			return cachedShellConfig;
+			const config = { shell: customShellPath, args: getShellArgs(customShellPath, mode) };
+			cachedShellConfigs.set(mode, config);
+			return config;
 		}
 		throw new Error(
 			`Custom shell path not found: ${customShellPath}\nPlease update shellPath in ${getSettingsPath()}`,
 		);
+	}
+
+	if (mode === "user" && process.platform !== "win32") {
+		const envShell = process.env.SHELL;
+		if (envShell && existsSync(envShell)) {
+			const config = { shell: envShell, args: getShellArgs(envShell, mode) };
+			cachedShellConfigs.set(mode, config);
+			return config;
+		}
 	}
 
 	if (process.platform === "win32") {
@@ -81,16 +129,18 @@ export function getShellConfig(): { shell: string; args: string[] } {
 
 		for (const path of paths) {
 			if (existsSync(path)) {
-				cachedShellConfig = { shell: path, args: ["-c"] };
-				return cachedShellConfig;
+				const config = { shell: path, args: getShellArgs(path, mode) };
+				cachedShellConfigs.set(mode, config);
+				return config;
 			}
 		}
 
 		// 3. Fallback: search bash.exe on PATH (Cygwin, MSYS2, WSL, etc.)
 		const bashOnPath = findBashOnPath();
 		if (bashOnPath) {
-			cachedShellConfig = { shell: bashOnPath, args: ["-c"] };
-			return cachedShellConfig;
+			const config = { shell: bashOnPath, args: getShellArgs(bashOnPath, mode) };
+			cachedShellConfigs.set(mode, config);
+			return config;
 		}
 
 		throw new Error(
@@ -104,18 +154,25 @@ export function getShellConfig(): { shell: string; args: string[] } {
 
 	// Unix: try /bin/bash, then bash on PATH, then fallback to sh
 	if (existsSync("/bin/bash")) {
-		cachedShellConfig = { shell: "/bin/bash", args: ["-c"] };
-		return cachedShellConfig;
+		const config = { shell: "/bin/bash", args: getShellArgs("/bin/bash", mode) };
+		cachedShellConfigs.set(mode, config);
+		return config;
 	}
 
 	const bashOnPath = findBashOnPath();
 	if (bashOnPath) {
-		cachedShellConfig = { shell: bashOnPath, args: ["-c"] };
-		return cachedShellConfig;
+		const config = { shell: bashOnPath, args: getShellArgs(bashOnPath, mode) };
+		cachedShellConfigs.set(mode, config);
+		return config;
 	}
 
-	cachedShellConfig = { shell: "sh", args: ["-c"] };
-	return cachedShellConfig;
+	const config = { shell: "sh", args: getShellArgs("sh", mode) };
+	cachedShellConfigs.set(mode, config);
+	return config;
+}
+
+export function resetShellConfigCache(): void {
+	cachedShellConfigs = new Map();
 }
 
 export function getShellEnv(): NodeJS.ProcessEnv {

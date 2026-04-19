@@ -11,6 +11,11 @@ import {
 } from "@mariozechner/pi-tui";
 import type { ModelRegistry } from "../../../core/model-registry.js";
 import type { SettingsManager } from "../../../core/settings-manager.js";
+import {
+	COPILOT_MULTIPLIERS,
+	type CopilotModelPolicy,
+	fetchCopilotModelPolicies,
+} from "../../../utils/copilot-model-policies.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
@@ -54,6 +59,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private modelRegistry: ModelRegistry;
 	private onSelectCallback: (model: Model<any>) => void;
 	private onCancelCallback: () => void;
+	private copilotPolicies: Map<string, CopilotModelPolicy> = new Map();
 	private errorMessage?: string;
 	private tui: TUI;
 	private scopedModels: ReadonlyArray<ScopedModelItem>;
@@ -163,6 +169,31 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			return;
 		}
 
+		// Fetch Copilot model policies (multiplier + disabled) if Copilot models are available
+		const copilotModel = models.find((m) => m.provider === "github-copilot");
+		if (copilotModel) {
+			const auth = await this.modelRegistry.getApiKeyAndHeaders(copilotModel.model);
+			if (auth.ok && auth.apiKey) {
+				this.copilotPolicies = await fetchCopilotModelPolicies(auth.apiKey, copilotModel.model.baseUrl);
+				if (this.copilotPolicies.size > 0) {
+					models = models.filter((m) => {
+						if (m.provider !== "github-copilot") return true;
+						const policy = this.copilotPolicies.get(m.id);
+						return !policy?.disabled;
+					});
+				}
+			}
+
+			// Filter out Copilot models with no known multiplier — unlisted models are
+			// deprecated or not yet available. x0 is valid (free included models).
+			models = models.filter((m) => {
+				if (m.provider !== "github-copilot") return true;
+				const apiMultiplier = this.copilotPolicies.get(m.id)?.multiplier;
+				const staticMultiplier = COPILOT_MULTIPLIERS[m.id];
+				return apiMultiplier !== undefined || staticMultiplier !== undefined;
+			});
+		}
+
 		this.allModels = this.sortModels(models);
 		this.scopedModels = this.scopedModels.map((scoped) => {
 			const refreshed = this.modelRegistry.find(scoped.model.provider, scoped.model.id);
@@ -180,15 +211,28 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			currentIndex >= 0 ? currentIndex : Math.min(this.selectedIndex, Math.max(0, this.filteredModels.length - 1));
 	}
 
+	private getModelFamily(id: string): string {
+		const parts = id.split("-");
+		const familyParts: string[] = [];
+		for (const part of parts) {
+			if (/^\d/.test(part)) break;
+			familyParts.push(part);
+		}
+		return familyParts.join("-") || id;
+	}
+
 	private sortModels(models: ModelItem[]): ModelItem[] {
 		const sorted = [...models];
-		// Sort: current model first, then by provider
 		sorted.sort((a, b) => {
 			const aIsCurrent = modelsAreEqual(this.currentModel, a.model);
 			const bIsCurrent = modelsAreEqual(this.currentModel, b.model);
 			if (aIsCurrent && !bIsCurrent) return -1;
 			if (!aIsCurrent && bIsCurrent) return 1;
-			return a.provider.localeCompare(b.provider);
+			const providerCmp = a.provider.localeCompare(b.provider);
+			if (providerCmp !== 0) return providerCmp;
+			const familyCmp = this.getModelFamily(a.id).localeCompare(this.getModelFamily(b.id));
+			if (familyCmp !== 0) return familyCmp;
+			return a.id.localeCompare(b.id);
 		});
 		return sorted;
 	}
@@ -237,6 +281,10 @@ export class ModelSelectorComponent extends Container implements Focusable {
 		);
 		const endIndex = Math.min(startIndex + maxVisible, this.filteredModels.length);
 
+		// Group headers are shown only when the list is unfiltered
+		const isFiltered = this.filteredModels.length < this.activeModels.length;
+		const showGroups = !isFiltered && this.filteredModels.length > 0;
+
 		// Show visible slice of filtered models
 		for (let i = startIndex; i < endIndex; i++) {
 			const item = this.filteredModels[i];
@@ -245,18 +293,38 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			const isSelected = i === this.selectedIndex;
 			const isCurrent = modelsAreEqual(this.currentModel, item.model);
 
+			if (showGroups) {
+				const prevItem = i > 0 ? this.filteredModels[i - 1] : undefined;
+				const family = this.getModelFamily(item.id);
+				const prevFamily = prevItem ? this.getModelFamily(prevItem.id) : undefined;
+				const prevProvider = prevItem?.provider;
+				if (family !== prevFamily || item.provider !== prevProvider) {
+					if (i > startIndex) {
+						this.listContainer.addChild(new Text("", 0, 0));
+					}
+					this.listContainer.addChild(new Text(theme.fg("dim", `  ${family}`), 0, 0));
+				}
+			}
+
+			const copilotPolicy = item.provider === "github-copilot" ? this.copilotPolicies.get(item.id) : undefined;
+			const multiplier =
+				item.provider === "github-copilot"
+					? (copilotPolicy?.multiplier ?? COPILOT_MULTIPLIERS[item.id])
+					: undefined;
+			const multiplierBadge = multiplier !== undefined ? theme.fg("dim", ` (x${multiplier})`) : "";
+
 			let line = "";
 			if (isSelected) {
 				const prefix = theme.fg("accent", "→ ");
 				const modelText = `${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${checkmark}`;
+				line = `${prefix + theme.fg("accent", modelText)} ${providerBadge}${multiplierBadge}${checkmark}`;
 			} else {
-				const modelText = `  ${item.id}`;
+				const modelText = `    ${item.id}`;
 				const providerBadge = theme.fg("muted", `[${item.provider}]`);
 				const checkmark = isCurrent ? theme.fg("success", " ✓") : "";
-				line = `${modelText} ${providerBadge}${checkmark}`;
+				line = `${modelText} ${providerBadge}${multiplierBadge}${checkmark}`;
 			}
 
 			this.listContainer.addChild(new Text(line, 0, 0));

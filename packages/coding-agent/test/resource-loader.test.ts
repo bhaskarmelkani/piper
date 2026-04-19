@@ -156,6 +156,45 @@ Project skill`,
 			expect(theme?.sourcePath).toBe(projectThemePath);
 		});
 
+		it("reloads project resources from the updated cwd", async () => {
+			const projectOne = join(tempDir, "project-one");
+			const projectTwo = join(tempDir, "project-two");
+			const settingsManager = SettingsManager.create(projectOne, agentDir);
+
+			mkdirSync(join(projectOne, ".pi", "prompts"), { recursive: true });
+			mkdirSync(join(projectTwo, ".pi", "prompts"), { recursive: true });
+			writeFileSync(
+				join(projectOne, ".pi", "prompts", "one.md"),
+				`---
+description: Prompt one
+---
+Project one prompt.`,
+			);
+			writeFileSync(
+				join(projectTwo, ".pi", "prompts", "two.md"),
+				`---
+description: Prompt two
+---
+Project two prompt.`,
+			);
+
+			const loader = new DefaultResourceLoader({
+				cwd: projectOne,
+				agentDir,
+				settingsManager,
+			});
+			await loader.reload();
+			expect(loader.getPrompts().prompts.map((prompt) => prompt.name)).toContain("one");
+			expect(loader.getPrompts().prompts.map((prompt) => prompt.name)).not.toContain("two");
+
+			settingsManager.setCwd(projectTwo, agentDir);
+			loader.setCwd(projectTwo);
+			await loader.reload();
+
+			expect(loader.getPrompts().prompts.map((prompt) => prompt.name)).toContain("two");
+			expect(loader.getPrompts().prompts.map((prompt) => prompt.name)).not.toContain("one");
+		});
+
 		it("should keep both extensions loaded when command names collide", async () => {
 			const userExtDir = join(agentDir, "extensions");
 			const projectExtDir = join(cwd, ".pi", "extensions");

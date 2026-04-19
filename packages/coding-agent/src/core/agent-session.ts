@@ -903,10 +903,12 @@ export class AgentSession {
 			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
+		const disabledSkills = this.settingsManager.getDisabledSkills();
 
 		return buildSystemPrompt({
 			cwd: this._cwd,
 			skills: loadedSkills,
+			disabledSkills,
 			contextFiles: loadedContextFiles,
 			customPrompt: loaderSystemPrompt,
 			appendSystemPrompt,
@@ -1356,6 +1358,11 @@ export class AgentSession {
 
 	get resourceLoader(): ResourceLoader {
 		return this._resourceLoader;
+	}
+
+	rebuildSystemPrompt(): void {
+		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
 	/**
@@ -2544,7 +2551,7 @@ export class AgentSession {
 	async executeBash(
 		command: string,
 		onChunk?: (chunk: string) => void,
-		options?: { excludeFromContext?: boolean; operations?: BashOperations },
+		options?: { excludeFromContext?: boolean; operations?: BashOperations; userShell?: boolean },
 	): Promise<BashResult> {
 		this._bashAbortController = new AbortController();
 
@@ -2556,7 +2563,7 @@ export class AgentSession {
 			const result = await executeBashWithOperations(
 				resolvedCommand,
 				this.sessionManager.getCwd(),
-				options?.operations ?? createLocalBashOperations(),
+				options?.operations ?? createLocalBashOperations({ mode: options?.userShell ? "user" : "tool" }),
 				{
 					onChunk,
 					signal: this._bashAbortController.signal,

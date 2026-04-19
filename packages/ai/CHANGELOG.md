@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `multiplier?: number` field to the `Model<TApi>` interface for representing premium request multipliers on subscription-based providers.
+- Added `COPILOT_MULTIPLIERS` lookup table to `generate-models.ts`, sourced from the [GitHub Copilot billing docs](https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers), so running `bun run generate-models` embeds the multiplier for each Copilot model directly in `models.generated.ts`.
+
 ## [0.67.68] - 2026-04-17
 
 ### Fixed

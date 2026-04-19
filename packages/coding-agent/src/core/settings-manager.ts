@@ -85,13 +85,14 @@ export interface Settings {
 	prompts?: string[]; // Array of local prompt template paths or directories
 	themes?: string[]; // Array of local theme file paths or directories
 	enableSkillCommands?: boolean; // default: true - register skills as /skill:name commands
+	disabledSkills?: string[]; // Skill names hidden from system prompt (still invokable via /skill:name)
 	terminal?: TerminalSettings;
 	images?: ImageSettings;
 	enabledModels?: string[]; // Model patterns for cycling (same format as --models CLI flag)
 	doubleEscapeAction?: "fork" | "tree" | "none"; // Action for double-escape with empty editor (default: "tree")
 	treeFilterMode?: "default" | "no-tools" | "user-only" | "labeled-only" | "all"; // Default filter when opening /tree
 	thinkingBudgets?: ThinkingBudgetsSettings; // Custom token budgets for thinking levels
-	editorPaddingX?: number; // Horizontal padding for input editor (default: 0)
+	editorPaddingX?: number; // Horizontal padding for input editor (default: 1)
 	autocompleteMaxVisible?: number; // Max visible items in autocomplete dropdown (default: 5)
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
@@ -133,6 +134,7 @@ export type SettingsScope = "global" | "project";
 
 export interface SettingsStorage {
 	withLock(scope: SettingsScope, fn: (current: string | undefined) => string | undefined): void;
+	setCwd?(cwd: string, agentDir?: string): void;
 }
 
 export interface SettingsError {
@@ -141,10 +143,18 @@ export interface SettingsError {
 }
 
 export class FileSettingsStorage implements SettingsStorage {
+	private agentDir: string;
 	private globalSettingsPath: string;
 	private projectSettingsPath: string;
 
 	constructor(cwd: string = process.cwd(), agentDir: string = getAgentDir()) {
+		this.agentDir = agentDir;
+		this.globalSettingsPath = join(agentDir, "settings.json");
+		this.projectSettingsPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
+	}
+
+	setCwd(cwd: string, agentDir: string = this.agentDir): void {
+		this.agentDir = agentDir;
 		this.globalSettingsPath = join(agentDir, "settings.json");
 		this.projectSettingsPath = join(cwd, CONFIG_DIR_NAME, "settings.json");
 	}
@@ -222,6 +232,8 @@ export class InMemorySettingsStorage implements SettingsStorage {
 			}
 		}
 	}
+
+	setCwd(): void {}
 }
 
 export class SettingsManager {
@@ -287,6 +299,10 @@ export class SettingsManager {
 	static inMemory(settings: Partial<Settings> = {}): SettingsManager {
 		const storage = new InMemorySettingsStorage();
 		return new SettingsManager(storage, settings, {});
+	}
+
+	setCwd(cwd: string, agentDir: string = getAgentDir()): void {
+		this.storage.setCwd?.(cwd, agentDir);
 	}
 
 	private static loadFromStorage(storage: SettingsStorage, scope: SettingsScope): Settings {
@@ -842,6 +858,17 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getDisabledSkills(): string[] {
+		return [...(this.settings.disabledSkills ?? [])];
+	}
+
+	setProjectDisabledSkills(names: string[]): void {
+		const projectSettings = structuredClone(this.projectSettings);
+		projectSettings.disabledSkills = names;
+		this.markProjectModified("disabledSkills");
+		this.saveProjectSettings(projectSettings);
+	}
+
 	getThinkingBudgets(): ThinkingBudgetsSettings | undefined {
 		return this.settings.thinkingBudgets;
 	}
@@ -945,7 +972,7 @@ export class SettingsManager {
 	}
 
 	getEditorPaddingX(): number {
-		return this.settings.editorPaddingX ?? 0;
+		return this.settings.editorPaddingX ?? 1;
 	}
 
 	setEditorPaddingX(padding: number): void {

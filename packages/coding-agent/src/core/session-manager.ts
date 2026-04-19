@@ -786,6 +786,31 @@ export class SessionManager {
 		return this.cwd;
 	}
 
+	setCwd(cwd: string): void {
+		const resolvedCwd = resolve(cwd);
+		if (resolvedCwd === this.cwd) {
+			return;
+		}
+
+		this.cwd = resolvedCwd;
+
+		const headerIndex = this.fileEntries.findIndex((entry) => entry.type === "session");
+		if (headerIndex === -1) {
+			return;
+		}
+
+		const header = this.fileEntries[headerIndex];
+		if (header?.type !== "session") {
+			return;
+		}
+
+		this.fileEntries[headerIndex] = {
+			...header,
+			cwd: resolvedCwd,
+		};
+		this._rewriteFile();
+	}
+
 	getSessionDir(): string {
 		return this.sessionDir;
 	}
