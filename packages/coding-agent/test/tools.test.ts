@@ -7,8 +7,11 @@ import { bashTool, createBashTool, createLocalBashOperations } from "../src/core
 import { editTool } from "../src/core/tools/edit.js";
 import { findTool } from "../src/core/tools/find.js";
 import { grepTool } from "../src/core/tools/grep.js";
+import { codingTools } from "../src/core/tools/index.js";
 import { lsTool } from "../src/core/tools/ls.js";
 import { readTool } from "../src/core/tools/read.js";
+import { createSearchCodeTool } from "../src/core/tools/search-code.js";
+import { createSymbolsOverviewTool } from "../src/core/tools/symbols-overview.js";
 import { writeTool } from "../src/core/tools/write.js";
 import * as shellModule from "../src/utils/shell.js";
 
@@ -578,6 +581,200 @@ describe("Coding Agent Tools", () => {
 
 			expect(output).toContain(".hidden-file");
 			expect(output).toContain(".hidden-dir/");
+		});
+	});
+
+	describe("search_code tool", () => {
+		it("should search code by keyword", async () => {
+			const tool = createSearchCodeTool(testDir);
+			const testFile = join(testDir, "alpha.ts");
+			writeFileSync(testFile, "export function alpha() {\n\treturn 'alpha'\n}\n");
+
+			const result = await tool.execute("search-code-keyword", {
+				method: "keyword",
+				query: "alpha",
+				path: testDir,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("alpha.ts");
+			expect(output).toContain("1: export function alpha()");
+		});
+
+		it("should search code by regex", async () => {
+			const tool = createSearchCodeTool(testDir);
+			const testFile = join(testDir, "beta.ts");
+			writeFileSync(testFile, "const beta = 1\nconst betamax = 2\n");
+
+			const result = await tool.execute("search-code-regex", {
+				method: "regex",
+				query: "beta\\s*=",
+				path: testDir,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("beta.ts");
+			expect(output).toContain("1: const beta = 1");
+			expect(output).not.toContain("betamax");
+		});
+
+		it("should search filenames", async () => {
+			const tool = createSearchCodeTool(testDir);
+			writeFileSync(join(testDir, "agent-session.ts"), "export const x = 1\n");
+			writeFileSync(join(testDir, "footer.ts"), "export const y = 2\n");
+
+			const result = await tool.execute("search-code-filename", {
+				method: "filename",
+				query: "agent",
+				path: testDir,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("agent-session.ts");
+			expect(output).not.toContain("footer.ts");
+		});
+
+		it("should support ast search with explicit language", async () => {
+			const testFile = join(testDir, "gamma.ts");
+			writeFileSync(testFile, "console.log(foo)\n");
+			const tool = createSearchCodeTool(testDir, {
+				operations: {
+					ensure: async () => "sg",
+					runAst: async () => [{ file: testFile, line: 1, text: "console.log(foo)" }],
+				},
+			});
+
+			const result = await tool.execute("search-code-ast", {
+				method: "ast",
+				query: "console.log($A)",
+				path: testDir,
+				language: "typescript",
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("gamma.ts");
+			expect(output).toContain("1: console.log(foo)");
+		});
+
+		it("should truncate broad searches with a refinement hint", async () => {
+			const tool = createSearchCodeTool(testDir);
+			for (let i = 0; i < 5; i++) {
+				writeFileSync(join(testDir, `many-${i}.ts`), `export const value${i} = "needle"\n`);
+			}
+
+			const result = await tool.execute("search-code-limit", {
+				method: "keyword",
+				query: "needle",
+				path: testDir,
+				limit: 2,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("2 results limit reached");
+			expect(output).toContain("Refine query, narrow path, or raise limit");
+		});
+
+		it("should fail ast search clearly when ast-grep is unavailable", async () => {
+			const tool = createSearchCodeTool(testDir, {
+				operations: {
+					ensure: async () => undefined,
+				},
+			});
+
+			await expect(
+				tool.execute("search-code-no-ast", {
+					method: "ast",
+					query: "console.log($A)",
+					path: testDir,
+					language: "typescript",
+				}),
+			).rejects.toThrow(/ast-grep is not available and could not be downloaded/);
+		});
+
+		it("should preserve offline ast failure behavior", async () => {
+			const tool = createSearchCodeTool(testDir, {
+				operations: {
+					ensure: async () => undefined,
+				},
+			});
+
+			process.env.PI_OFFLINE = "1";
+			await expect(
+				tool.execute("search-code-offline", {
+					method: "ast",
+					query: "console.log($A)",
+					path: testDir,
+					language: "typescript",
+				}),
+			).rejects.toThrow(/ast-grep is not available and could not be downloaded/);
+			delete process.env.PI_OFFLINE;
+		});
+	});
+
+	describe("symbols_overview tool", () => {
+		it("should summarize top-level symbols for ts files", async () => {
+			const tool = createSymbolsOverviewTool(testDir);
+			const testFile = join(testDir, "symbols.ts");
+			writeFileSync(
+				testFile,
+				[
+					"export interface Foo {}",
+					"export class Bar {}",
+					"export function baz() {}",
+					"const helper = () => 1",
+				].join("\n"),
+			);
+
+			const result = await tool.execute("symbols-file", {
+				path: testFile,
+				scope: "file",
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("symbols.ts");
+			expect(output).toContain("1: interface Foo");
+			expect(output).toContain("2: class Bar");
+			expect(output).toContain("3: function baz");
+		});
+
+		it("should summarize folders with stable file ordering", async () => {
+			const tool = createSymbolsOverviewTool(testDir);
+			writeFileSync(join(testDir, "zeta.py"), "def zebra():\n    pass\n");
+			writeFileSync(join(testDir, "alpha.ts"), "export class Alpha {}\nexport function start() {}\n");
+			writeFileSync(join(testDir, "beta.ts"), "export function beta() {}\n");
+
+			const result = await tool.execute("symbols-folder", {
+				path: testDir,
+				scope: "folder",
+				maxItems: 2,
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("alpha.ts");
+			expect(output).toContain("beta.ts");
+			expect(output).not.toContain("zeta.py");
+		});
+
+		it("should fall back gracefully for non-ts files", async () => {
+			const tool = createSymbolsOverviewTool(testDir);
+			const testFile = join(testDir, "worker.py");
+			writeFileSync(testFile, "class Worker:\n    pass\n\ndef run():\n    pass\n");
+
+			const result = await tool.execute("symbols-generic", {
+				path: testFile,
+				scope: "file",
+			});
+
+			const output = getTextOutput(result);
+			expect(output).toContain("1: type Worker");
+			expect(output).toContain("4: function run");
+		});
+	});
+
+	describe("tool defaults", () => {
+		it("should include smart navigation tools in codingTools", () => {
+			const names = codingTools.map((tool) => tool.name);
+			expect(names).toEqual(["read", "bash", "edit", "write", "search_code", "symbols_overview"]);
 		});
 	});
 });

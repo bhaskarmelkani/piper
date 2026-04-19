@@ -22,6 +22,7 @@ interface ToolConfig {
 	name: string;
 	repo: string; // GitHub repo (e.g., "sharkdp/fd")
 	binaryName: string; // Name of the binary inside the archive
+	extraBinaryNames?: string[]; // Companion binaries that must sit next to the main binary
 	tagPrefix: string; // Prefix for tags (e.g., "v" for v1.0.0, "" for 1.0.0)
 	getAssetName: (version: string, plat: string, architecture: string) => string | null;
 }
@@ -67,6 +68,30 @@ const TOOLS: Record<string, ToolConfig> = {
 			return null;
 		},
 	},
+	"ast-grep": {
+		name: "ast-grep",
+		repo: "ast-grep/ast-grep",
+		binaryName: "ast-grep",
+		tagPrefix: "",
+		getAssetName: (_version, plat, architecture) => {
+			if (plat === "darwin") {
+				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
+				return `app-${archStr}-apple-darwin.zip`;
+			} else if (plat === "linux") {
+				const archStr = architecture === "arm64" ? "aarch64" : "x86_64";
+				return `app-${archStr}-unknown-linux-gnu.zip`;
+			} else if (plat === "win32") {
+				if (architecture === "x64") {
+					return "app-x86_64-pc-windows-msvc.zip";
+				}
+				if (architecture === "arm64") {
+					return "app-aarch64-pc-windows-msvc.zip";
+				}
+				return "app-i686-pc-windows-msvc.zip";
+			}
+			return null;
+		},
+	},
 };
 
 // Check if a command exists in PATH by trying to run it
@@ -81,13 +106,15 @@ function commandExists(cmd: string): boolean {
 }
 
 // Get the path to a tool (system-wide or in our tools dir)
-export function getToolPath(tool: "fd" | "rg"): string | null {
+export function getToolPath(tool: "fd" | "rg" | "ast-grep"): string | null {
 	const config = TOOLS[tool];
 	if (!config) return null;
 
 	// Check our tools directory first
-	const localPath = join(TOOLS_DIR, config.binaryName + (platform() === "win32" ? ".exe" : ""));
-	if (existsSync(localPath)) {
+	const ext = platform() === "win32" ? ".exe" : "";
+	const localPath = join(TOOLS_DIR, config.binaryName + ext);
+	const extras = (config.extraBinaryNames ?? []).map((name) => join(TOOLS_DIR, name + ext));
+	if (existsSync(localPath) && extras.every((file) => existsSync(file))) {
 		return localPath;
 	}
 
@@ -155,7 +182,7 @@ function findBinaryRecursively(rootDir: string, binaryFileName: string): string 
 }
 
 // Download and install a tool
-async function downloadTool(tool: "fd" | "rg"): Promise<string> {
+async function downloadTool(tool: "fd" | "rg" | "ast-grep"): Promise<string> {
 	const config = TOOLS[tool];
 	if (!config) throw new Error(`Unknown tool: ${tool}`);
 
@@ -178,6 +205,7 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 	const archivePath = join(TOOLS_DIR, assetName);
 	const binaryExt = plat === "win32" ? ".exe" : "";
 	const binaryPath = join(TOOLS_DIR, config.binaryName + binaryExt);
+	const extraPaths = (config.extraBinaryNames ?? []).map((name) => join(TOOLS_DIR, name + binaryExt));
 
 	// Download
 	await downloadFile(downloadUrl, archivePath);
@@ -215,14 +243,35 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 		}
 
 		if (extractedBinary) {
+			rmSync(binaryPath, { force: true });
 			renameSync(extractedBinary, binaryPath);
 		} else {
 			throw new Error(`Binary not found in archive: expected ${binaryFileName} under ${extractDir}`);
 		}
 
+		for (let i = 0; i < extraPaths.length; i++) {
+			const name = config.extraBinaryNames?.[i];
+			if (!name) {
+				continue;
+			}
+			const fileName = name + binaryExt;
+			const extracted =
+				findBinaryRecursively(extractDir, fileName) ??
+				findBinaryRecursively(extractedDir, fileName) ??
+				findBinaryRecursively(extractDir, fileName);
+			if (!extracted) {
+				throw new Error(`Companion binary not found in archive: expected ${fileName}`);
+			}
+			rmSync(extraPaths[i], { force: true });
+			renameSync(extracted, extraPaths[i]);
+		}
+
 		// Make executable (Unix only)
 		if (plat !== "win32") {
 			chmodSync(binaryPath, 0o755);
+			for (const file of extraPaths) {
+				chmodSync(file, 0o755);
+			}
 		}
 	} finally {
 		// Cleanup
@@ -237,11 +286,12 @@ async function downloadTool(tool: "fd" | "rg"): Promise<string> {
 const TERMUX_PACKAGES: Record<string, string> = {
 	fd: "fd",
 	rg: "ripgrep",
+	"ast-grep": "ast-grep",
 };
 
 // Ensure a tool is available, downloading if necessary
 // Returns the path to the tool, or null if unavailable
-export async function ensureTool(tool: "fd" | "rg", silent: boolean = false): Promise<string | undefined> {
+export async function ensureTool(tool: "fd" | "rg" | "ast-grep", silent: boolean = false): Promise<string | undefined> {
 	const existingPath = getToolPath(tool);
 	if (existingPath) {
 		return existingPath;

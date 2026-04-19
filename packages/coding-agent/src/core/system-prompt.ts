@@ -8,7 +8,7 @@ import { formatSkillsForPrompt, type Skill } from "./skills.js";
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Tools to include in prompt. Default: [read, bash, edit, write] */
+	/** Tools to include in prompt. Default: [read, bash, edit, write, search_code, symbols_overview] */
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
@@ -89,7 +89,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 
 	// Build tools list based on selected tools.
 	// A tool appears in Available tools only when the caller provides a one-line snippet.
-	const tools = selectedTools || ["read", "bash", "edit", "write"];
+	const tools = selectedTools || ["read", "bash", "edit", "write", "search_code", "symbols_overview"];
 	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
 	const toolsList =
 		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
@@ -106,16 +106,29 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	};
 
 	const hasBash = tools.includes("bash");
+	const hasSearchCode = tools.includes("search_code");
+	const hasSymbolsOverview = tools.includes("symbols_overview");
 	const hasGrep = tools.includes("grep");
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
 
 	// File exploration guidelines
-	if (hasBash && !hasGrep && !hasFind && !hasLs) {
+	if (hasSearchCode) {
+		addGuideline("Use search_code for keyword, regex, filename, or AST discovery before bash");
+	}
+	if (hasSymbolsOverview) {
+		addGuideline("Use symbols_overview before opening large files or folders");
+	}
+	if (hasRead && (hasSearchCode || hasSymbolsOverview)) {
+		addGuideline("Use read only on the most relevant files after search_code and symbols_overview");
+	}
+	if (hasBash && !hasSearchCode && !hasGrep && !hasFind && !hasLs) {
 		addGuideline("Use bash for file operations like ls, rg, find");
-	} else if (hasBash && (hasGrep || hasFind || hasLs)) {
-		addGuideline("Prefer grep/find/ls tools over bash for file exploration (faster, respects .gitignore)");
+	} else if (hasBash && (hasSearchCode || hasSymbolsOverview || hasGrep || hasFind || hasLs)) {
+		addGuideline(
+			"Prefer search_code and symbols_overview for code navigation. Use grep/find/ls only when you need their specific behavior",
+		);
 	}
 
 	for (const guideline of promptGuidelines ?? []) {

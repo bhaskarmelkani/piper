@@ -71,6 +71,10 @@ import type {
 	LsToolInput,
 	ReadToolDetails,
 	ReadToolInput,
+	SearchCodeToolDetails,
+	SearchCodeToolInput,
+	SymbolsOverviewToolDetails,
+	SymbolsOverviewToolInput,
 	WriteToolInput,
 } from "../tools/index.js";
 
@@ -764,6 +768,16 @@ export interface LsToolCallEvent extends ToolCallEventBase {
 	input: LsToolInput;
 }
 
+export interface SearchCodeToolCallEvent extends ToolCallEventBase {
+	toolName: "search_code";
+	input: SearchCodeToolInput;
+}
+
+export interface SymbolsOverviewToolCallEvent extends ToolCallEventBase {
+	toolName: "symbols_overview";
+	input: SymbolsOverviewToolInput;
+}
+
 export interface CustomToolCallEvent extends ToolCallEventBase {
 	toolName: string;
 	input: Record<string, unknown>;
@@ -783,6 +797,8 @@ export type ToolCallEvent =
 	| GrepToolCallEvent
 	| FindToolCallEvent
 	| LsToolCallEvent
+	| SearchCodeToolCallEvent
+	| SymbolsOverviewToolCallEvent
 	| CustomToolCallEvent;
 
 interface ToolResultEventBase {
@@ -828,6 +844,16 @@ export interface LsToolResultEvent extends ToolResultEventBase {
 	details: LsToolDetails | undefined;
 }
 
+export interface SearchCodeToolResultEvent extends ToolResultEventBase {
+	toolName: "search_code";
+	details: SearchCodeToolDetails | undefined;
+}
+
+export interface SymbolsOverviewToolResultEvent extends ToolResultEventBase {
+	toolName: "symbols_overview";
+	details: SymbolsOverviewToolDetails | undefined;
+}
+
 export interface CustomToolResultEvent extends ToolResultEventBase {
 	toolName: string;
 	details: unknown;
@@ -842,6 +868,8 @@ export type ToolResultEvent =
 	| GrepToolResultEvent
 	| FindToolResultEvent
 	| LsToolResultEvent
+	| SearchCodeToolResultEvent
+	| SymbolsOverviewToolResultEvent
 	| CustomToolResultEvent;
 
 // Type guards for ToolResultEvent
@@ -865,6 +893,12 @@ export function isFindToolResult(e: ToolResultEvent): e is FindToolResultEvent {
 }
 export function isLsToolResult(e: ToolResultEvent): e is LsToolResultEvent {
 	return e.toolName === "ls";
+}
+export function isSearchCodeToolResult(e: ToolResultEvent): e is SearchCodeToolResultEvent {
+	return e.toolName === "search_code";
+}
+export function isSymbolsOverviewToolResult(e: ToolResultEvent): e is SymbolsOverviewToolResultEvent {
+	return e.toolName === "symbols_overview";
 }
 
 /**
@@ -894,6 +928,11 @@ export function isToolCallEventType(toolName: "write", event: ToolCallEvent): ev
 export function isToolCallEventType(toolName: "grep", event: ToolCallEvent): event is GrepToolCallEvent;
 export function isToolCallEventType(toolName: "find", event: ToolCallEvent): event is FindToolCallEvent;
 export function isToolCallEventType(toolName: "ls", event: ToolCallEvent): event is LsToolCallEvent;
+export function isToolCallEventType(toolName: "search_code", event: ToolCallEvent): event is SearchCodeToolCallEvent;
+export function isToolCallEventType(
+	toolName: "symbols_overview",
+	event: ToolCallEvent,
+): event is SymbolsOverviewToolCallEvent;
 export function isToolCallEventType<TName extends string, TInput extends Record<string, unknown>>(
 	toolName: TName,
 	event: ToolCallEvent,

@@ -63,6 +63,26 @@ export {
 	readToolDefinition,
 } from "./read.js";
 export {
+	createSearchCodeTool,
+	createSearchCodeToolDefinition,
+	type SearchCodeOperations,
+	type SearchCodeToolDetails,
+	type SearchCodeToolInput,
+	type SearchCodeToolOptions,
+	searchCodeTool,
+	searchCodeToolDefinition,
+} from "./search-code.js";
+export {
+	createSymbolsOverviewTool,
+	createSymbolsOverviewToolDefinition,
+	type SymbolsOverviewOperations,
+	type SymbolsOverviewToolDetails,
+	type SymbolsOverviewToolInput,
+	type SymbolsOverviewToolOptions,
+	symbolsOverviewTool,
+	symbolsOverviewToolDefinition,
+} from "./symbols-overview.js";
+export {
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 	formatSize,
@@ -102,12 +122,24 @@ import {
 	readTool,
 	readToolDefinition,
 } from "./read.js";
+import {
+	createSearchCodeTool,
+	createSearchCodeToolDefinition,
+	searchCodeTool,
+	searchCodeToolDefinition,
+} from "./search-code.js";
+import {
+	createSymbolsOverviewTool,
+	createSymbolsOverviewToolDefinition,
+	symbolsOverviewTool,
+	symbolsOverviewToolDefinition,
+} from "./symbols-overview.js";
 import { createWriteTool, createWriteToolDefinition, writeTool, writeToolDefinition } from "./write.js";
 
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 
-export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool];
+export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool, searchCodeTool, symbolsOverviewTool];
 export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
 
 export const allTools = {
@@ -115,6 +147,8 @@ export const allTools = {
 	bash: bashTool,
 	edit: editTool,
 	write: writeTool,
+	search_code: searchCodeTool,
+	symbols_overview: symbolsOverviewTool,
 	grep: grepTool,
 	find: findTool,
 	ls: lsTool,
@@ -125,6 +159,8 @@ export const allToolDefinitions = {
 	bash: bashToolDefinition,
 	edit: editToolDefinition,
 	write: writeToolDefinition,
+	search_code: searchCodeToolDefinition,
+	symbols_overview: symbolsOverviewToolDefinition,
 	grep: grepToolDefinition,
 	find: findToolDefinition,
 	ls: lsToolDefinition,
@@ -143,6 +179,8 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createBashToolDefinition(cwd, options?.bash),
 		createEditToolDefinition(cwd),
 		createWriteToolDefinition(cwd),
+		createSearchCodeToolDefinition(cwd),
+		createSymbolsOverviewToolDefinition(cwd),
 	];
 }
 
@@ -161,6 +199,8 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		bash: createBashToolDefinition(cwd, options?.bash),
 		edit: createEditToolDefinition(cwd),
 		write: createWriteToolDefinition(cwd),
+		search_code: createSearchCodeToolDefinition(cwd),
+		symbols_overview: createSymbolsOverviewToolDefinition(cwd),
 		grep: createGrepToolDefinition(cwd),
 		find: createFindToolDefinition(cwd),
 		ls: createLsToolDefinition(cwd),
@@ -173,6 +213,8 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createBashTool(cwd, options?.bash),
 		createEditTool(cwd),
 		createWriteTool(cwd),
+		createSearchCodeTool(cwd),
+		createSymbolsOverviewTool(cwd),
 	];
 }
 
@@ -186,6 +228,8 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		bash: createBashTool(cwd, options?.bash),
 		edit: createEditTool(cwd),
 		write: createWriteTool(cwd),
+		search_code: createSearchCodeTool(cwd),
+		symbols_overview: createSymbolsOverviewTool(cwd),
 		grep: createGrepTool(cwd),
 		find: createFindTool(cwd),
 		ls: createLsTool(cwd),
