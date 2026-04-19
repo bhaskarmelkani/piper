@@ -84,6 +84,11 @@ export class ProcessTerminal implements Terminal {
 		this.inputHandler = onInput;
 		this.resizeHandler = onResize;
 
+		// Switch to alternate screen buffer so trackpad/wheel scroll is delivered to the app
+		// via SGR mouse tracking instead of scrolling terminal history (which would show
+		// stale frames from the fixed-height Viewport layout).
+		process.stdout.write("\x1b[?1049h\x1b[2J\x1b[H");
+
 		// Save previous state and enable raw mode
 		this.wasRaw = process.stdin.isRaw || false;
 		if (process.stdin.setRawMode) {
@@ -94,6 +99,12 @@ export class ProcessTerminal implements Terminal {
 
 		// Enable bracketed paste mode - terminal will wrap pastes in \x1b[200~ ... \x1b[201~
 		process.stdout.write("\x1b[?2004h");
+
+		// Enable alternate scroll mode (?1007h) so scroll wheel events are delivered as
+		// Up/Down cursor key sequences. This allows native text selection without holding
+		// Shift, while still routing scroll wheel to the transcript via the input listener.
+		// Clear motion/button tracking modes first to avoid stale state.
+		process.stdout.write("\x1b[?1002l\x1b[?1003l\x1b[?1000l\x1b[?1006l\x1b[?1007h");
 
 		// Set up resize handler immediately
 		process.stdout.on("resize", this.resizeHandler);
@@ -263,6 +274,10 @@ export class ProcessTerminal implements Terminal {
 	stop(): void {
 		// Disable bracketed paste mode
 		process.stdout.write("\x1b[?2004l");
+
+		// Disable mouse tracking and restore main screen buffer
+		process.stdout.write("\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1007l");
+		process.stdout.write("\x1b[?1049l");
 
 		// Disable Kitty keyboard protocol if not already done by drainInput()
 		if (this._kittyProtocolActive) {

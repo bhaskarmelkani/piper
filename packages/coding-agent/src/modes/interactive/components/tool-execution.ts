@@ -330,7 +330,11 @@ export class ToolExecutionComponent extends Container {
 	}
 
 	private formatToolExecution(): string {
-		let text = theme.fg("toolTitle", theme.bold(this.toolName));
+		const title = theme.fg("toolTitle", theme.bold(this.toolName));
+		if (!this.expanded) {
+			return title;
+		}
+		let text = title;
 		const content = JSON.stringify(this.args, null, 2);
 		if (content) {
 			text += `\n\n${content}`;

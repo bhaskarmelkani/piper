@@ -1,4 +1,4 @@
-#!/usr/bin/env tsx
+#!/usr/bin/env bun
 /**
  * Manual SDK probe for OpenAI Codex prompt caching through the tool loop.
  *

@@ -54,6 +54,7 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 | `widget-placement.ts` | Shows widgets above and below the editor via `ctx.ui.setWidget()` placement |
 | `hidden-thinking-label.ts` | Customizes the collapsed thinking label via `ctx.ui.setHiddenThinkingLabel()` |
 | `model-status.ts` | Shows model changes in status bar via `model_select` hook |
+| `copilot-budget.ts` | Shows GitHub Copilot premium request usage in the sidebar via keyed sidebar sections |
 | `snake.ts` | Snake game with custom UI, keyboard handling, and session persistence |
 | `tic-tac-toe.ts` | Tic-tac-toe vs the agent with `executionMode: "sequential"` tools to prevent race conditions on shared cursor state |
 | `send-user-message.ts` | Demonstrates `pi.sendUserMessage()` for sending user messages from extensions |

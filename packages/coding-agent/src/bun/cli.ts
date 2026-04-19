@@ -1,6 +1,6 @@
-#!/usr/bin/env node
-process.title = "pi";
+#!/usr/bin/env bun
+process.title = "piper";
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
-await import("./register-bedrock.js");
-await import("../cli.js");
+import "./register-bedrock.js";
+import "../cli.js";

@@ -197,6 +197,7 @@ const noOpUIContext: ExtensionUIContext = {
 	setTheme: (_theme: string | Theme) => ({ success: false, error: "UI not available" }),
 	getToolsExpanded: () => false,
 	setToolsExpanded: () => {},
+	setSidebarSections: (_keyOrSections?: string | unknown, _sections?: unknown, _options?: unknown) => {},
 };
 
 export class ExtensionRunner {

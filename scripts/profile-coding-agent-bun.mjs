@@ -17,26 +17,26 @@ const startupBenchmarkEnvName = "PI_STARTUP_BENCHMARK";
 
 function printHelp() {
 	console.log(`Usage:
-  node scripts/profile-coding-agent-node.mjs [options]
+  bun scripts/profile-coding-agent-bun.mjs [options]
 
 Profiles coding-agent startup with the runtime selected below:
-- npm run profile:tui     -> builds packages/coding-agent and profiles TUI startup with Node
-- npm run profile:rpc     -> builds packages/coding-agent and profiles RPC startup with Node
 - bun run profile:tui     -> profiles TUI startup from src/cli.ts directly with Bun
 - bun run profile:rpc     -> profiles RPC startup from src/cli.ts directly with Bun
+- bun scripts/profile-coding-agent-bun.mjs --runtime node --mode tui
+                         -> optional legacy Node comparison against dist/cli.js
 
 Options:
   --mode <name>          tui or rpc (default: tui)
   --runs <n>             Number of measured runs (default: 1)
   --warmup <n>           Number of warmup runs before measurements (default: 0)
   --profile-dir <dir>    CPU profile output directory
-                         Default: profiles-node for Node, profiles-bun for Bun
+                         Default: profiles-bun for Bun, profiles-node for legacy Node
   --label <name>         Profile name prefix (default: <mode>-startup)
-  --runtime <name>       node, bun, or auto (default: auto)
+  --runtime <name>       bun, node, or auto (default: auto)
   --agent-dir <dir>      Use a specific PI_CODING_AGENT_DIR for the benchmark run
   --isolated-agent-dir   Use a fresh temporary agent dir instead of the normal one
   --no-offline           Do not force PI_OFFLINE=1 / PI_SKIP_VERSION_CHECK=1
-  --skip-build           Reuse the current dist/cli.js without rebuilding first (Node only)
+  --skip-build           Reuse the current dist/cli.js without rebuilding first (legacy Node only)
   --cpu-profile          Write CPU profiles for benchmark runs
   --help                 Show this help
 

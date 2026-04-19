@@ -297,6 +297,21 @@ describe("extensions discovery", () => {
 		expect(result.extensions[0].path).toContain("my-ext.ts");
 	});
 
+	it("loads project-local extensions before global agent extensions", async () => {
+		const localDir = path.join(tempDir, ".pi", "extensions");
+		const globalDir = path.join(tempDir, "agent", "extensions");
+		fs.mkdirSync(localDir, { recursive: true });
+		fs.mkdirSync(globalDir, { recursive: true });
+		fs.writeFileSync(path.join(localDir, "local.ts"), extensionCode);
+		fs.writeFileSync(path.join(globalDir, "global.ts"), extensionCode);
+
+		const result = await discoverAndLoadExtensions([], tempDir, path.join(tempDir, "agent"));
+
+		expect(result.errors).toHaveLength(0);
+		expect(result.extensions).toHaveLength(2);
+		expect(result.extensions.map((entry) => path.basename(entry.path))).toEqual(["local.ts", "global.ts"]);
+	});
+
 	it("resolves dependencies from extension's own node_modules", async () => {
 		// Load extension that has its own package.json and node_modules with 'ms' package
 		const extPath = path.resolve(__dirname, "../examples/extensions/with-deps");

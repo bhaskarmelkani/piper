@@ -9,6 +9,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } from "@mariozechner/pi-ai";
+import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import type {
 	AutocompleteItem,
 	EditorComponent,
@@ -21,10 +22,13 @@ import type {
 	SlashCommand,
 } from "@mariozechner/pi-tui";
 import {
+	BottomDockLayout,
+	type BottomDockLayoutMeasurement,
 	CombinedAutocompleteProvider,
 	type Component,
 	Container,
 	fuzzyFilter,
+	HorizontalSplit,
 	Loader,
 	Markdown,
 	matchesKey,
@@ -34,16 +38,20 @@ import {
 	Text,
 	TruncatedText,
 	TUI,
+	Viewport,
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
+	APP_SYMBOL,
+	CHANGELOG_URL,
 	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
 	getShareViewerUrl,
 	getUpdateInstruction,
+	PACKAGE_NAME,
 	VERSION,
 } from "../../config.js";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
@@ -51,6 +59,8 @@ import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../
 import type {
 	ExtensionContext,
 	ExtensionRunner,
+	ExtensionSidebarOptions,
+	ExtensionSidebarSection,
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
@@ -91,10 +101,11 @@ import { FooterComponent } from "./components/footer.js";
 import { keyHint, keyText, rawKeyHint } from "./components/keybinding-hints.js";
 import { LoginDialogComponent } from "./components/login-dialog.js";
 import { ModelSelectorComponent } from "./components/model-selector.js";
-import { OAuthSelectorComponent } from "./components/oauth-selector.js";
 import { ScopedModelsSelectorComponent } from "./components/scoped-models-selector.js";
 import { SessionSelectorComponent } from "./components/session-selector.js";
 import { SettingsSelectorComponent } from "./components/settings-selector.js";
+import { ShellDockComponent } from "./components/shell-dock.js";
+import { ShellSidebarComponent } from "./components/shell-sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
@@ -147,6 +158,15 @@ type CompactionQueuedMessage = {
 	mode: "steer" | "followUp";
 };
 
+type SidebarContribution = {
+	key: string;
+	sections: ExtensionSidebarSection[];
+	order: number;
+	sequence: number;
+};
+
+type SidebarDisplaySection = ExtensionSidebarSection & { order?: number };
+
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party usage now draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
 
@@ -195,9 +215,17 @@ export class InteractiveMode {
 	private editor: EditorComponent;
 	private autocompleteProvider: CombinedAutocompleteProvider | undefined;
 	private fdPath: string | undefined;
+	private transcriptContainer: Container;
+	private transcriptViewport: Viewport;
 	private editorContainer: Container;
+	private interactionContainer: Container;
+	private dockTransientContainer: Container;
+	private dockHintsText: Text;
+	private dockHints: Container;
 	private footer: FooterComponent;
 	private footerDataProvider: FooterDataProvider;
+	private dockComponent: ShellDockComponent;
+	private rootLayout: BottomDockLayout;
 	// Stored so the same manager can be injected into custom editors, selectors, and extension UI.
 	private keybindings: KeybindingsManager;
 	private version: string;
@@ -268,7 +296,9 @@ export class InteractiveMode {
 
 	// Extension UI state
 	private extensionSelector: ExtensionSelectorComponent | undefined = undefined;
+	private extensionSelectorCancel: (() => void) | undefined = undefined;
 	private extensionInput: ExtensionInputComponent | undefined = undefined;
+	private extensionInputCancel: (() => void) | undefined = undefined;
 	private extensionEditor: ExtensionEditorComponent | undefined = undefined;
 	private extensionTerminalInputUnsubscribers = new Set<() => void>();
 
@@ -289,6 +319,34 @@ export class InteractiveMode {
 
 	// Custom header from extension (undefined = use built-in header)
 	private customHeader: (Component & { dispose?(): void }) | undefined = undefined;
+
+	// Shell layout: transcript viewport on the left, persistent sidebar on the right, dock at the bottom
+	private shellLayout: HorizontalSplit;
+	private sidebarComponent: ShellSidebarComponent;
+	private transcriptScrollOffset = 0;
+
+	// Smooth scroll animation: lerp from current display position toward scrollTarget.
+	// Each wheel event advances scrollTarget; an 8 ms timer steps scrollSmoothed toward it.
+	// This removes the jitter caused by Node.js batching multiple SGR events per stdin read.
+	private scrollTarget = 0;
+	private scrollSmoothed = 0;
+	private scrollAnimTimer: ReturnType<typeof setTimeout> | undefined;
+	private static readonly SCROLL_ANIM_MS = 8;
+	private static readonly SCROLL_LERP = 0.4;
+
+	// Sidebar visibility state (actual display also depends on terminal width)
+	private sidebarVisible = true;
+	private sidebarContributions = new Map<string, SidebarContribution>();
+	private sidebarContributionSequence = 0;
+
+	private static readonly SIDEBAR_WIDTH = 30;
+	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
+	private static readonly MIN_TRANSCRIPT_HEIGHT = 6;
+	private static readonly MAX_DOCK_HEIGHT_RATIO = 0.4;
+	private static readonly SCROLL_EPSILON = 0.1;
+	private static readonly BUILTIN_SIDEBAR_CONTEXT_KEY = "__builtin_context__";
+	private static readonly BUILTIN_SIDEBAR_CAPABILITIES_KEY = "__builtin_capabilities__";
+	private static readonly LEGACY_EXTENSION_SIDEBAR_KEY = "__legacy_extension__";
 
 	// Convenience accessors
 	private get session(): AgentSession {
@@ -314,10 +372,24 @@ export class InteractiveMode {
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
 		this.headerContainer = new Container();
 		this.chatContainer = new Container();
+		this.transcriptContainer = new Container();
+		this.transcriptViewport = new Viewport(this.transcriptContainer, { anchor: "bottom" });
 		this.pendingMessagesContainer = new Container();
 		this.statusContainer = new Container();
 		this.widgetContainerAbove = new Container();
 		this.widgetContainerBelow = new Container();
+		this.interactionContainer = new Container();
+		this.dockTransientContainer = new Container();
+		this.dockHintsText = new Text("", 0, 0);
+		this.dockHints = new Container();
+		this.dockHints.addChild(new Spacer(1));
+		this.dockHints.addChild(this.dockHintsText);
+		this.shellLayout = new HorizontalSplit(
+			this.transcriptViewport,
+			null,
+			InteractiveMode.SIDEBAR_WIDTH,
+			(width) => this.sidebarVisible && width >= InteractiveMode.SIDEBAR_MIN_TERMINAL_WIDTH,
+		);
 		this.keybindings = KeybindingsManager.create();
 		setKeybindings(this.keybindings);
 		const editorPaddingX = this.settingsManager.getEditorPaddingX();
@@ -332,6 +404,22 @@ export class InteractiveMode {
 		this.footerDataProvider = new FooterDataProvider(this.sessionManager.getCwd());
 		this.footer = new FooterComponent(this.session, this.footerDataProvider);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
+		this.sidebarComponent = new ShellSidebarComponent(this.runtimeHost.session, this.footerDataProvider);
+		this.shellLayout.setRight(this.sidebarComponent);
+		this.dockComponent = new ShellDockComponent(
+			this.dockHints,
+			this.dockTransientContainer,
+			this.editorContainer,
+			this.widgetContainerBelow,
+			this.footer,
+			() => this.getMaxDockHeight(),
+		);
+		this.rootLayout = new BottomDockLayout(
+			this.shellLayout,
+			this.dockComponent,
+			() => this.ui.terminal.rows,
+			(measurement) => this.handleRootLayoutMeasurement(measurement),
+		);
 
 		// Load hide thinking block setting
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
@@ -517,55 +605,27 @@ export class InteractiveMode {
 		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
 		this.fdPath = fdPath;
 
-		// Add header container as first child
-		this.ui.addChild(this.headerContainer);
+		// Add fixed shell layout as the single top-level child of the TUI.
+		this.ui.addChild(this.rootLayout);
+
+		// Add header container as the first child of the transcript layout.
+		this.transcriptContainer.addChild(this.headerContainer);
 
 		// Add header with keybindings from config (unless silenced)
 		if (this.options.verbose || !this.settingsManager.getQuietStartup()) {
-			const logo = theme.bold(theme.fg("accent", APP_NAME)) + theme.fg("dim", ` v${this.version}`);
+			const logo =
+				theme.bold(theme.fg("accent", APP_SYMBOL)) +
+				theme.fg("dim", " ") +
+				theme.bold(theme.fg("accent", APP_NAME)) +
+				theme.fg("dim", ` v${this.version}`);
 
-			// Build startup instructions using keybinding hint helpers
-			const hint = (keybinding: AppKeybinding, description: string) => keyHint(keybinding, description);
-
-			const expandedInstructions = [
-				hint("app.interrupt", "to interrupt"),
-				hint("app.clear", "to clear"),
-				rawKeyHint(`${keyText("app.clear")} twice`, "to exit"),
-				hint("app.exit", "to exit (empty)"),
-				hint("app.suspend", "to suspend"),
-				keyHint("tui.editor.deleteToLineEnd", "to delete to end"),
-				hint("app.thinking.cycle", "to cycle thinking level"),
-				rawKeyHint(`${keyText("app.model.cycleForward")}/${keyText("app.model.cycleBackward")}`, "to cycle models"),
-				hint("app.model.select", "to select model"),
-				hint("app.tools.expand", "to expand tools"),
-				hint("app.thinking.toggle", "to expand thinking"),
-				hint("app.editor.external", "for external editor"),
-				rawKeyHint("/", "for commands"),
-				rawKeyHint("!", "to run bash"),
-				rawKeyHint("!!", "to run bash (no context)"),
-				hint("app.message.followUp", "to queue follow-up"),
-				hint("app.message.dequeue", "to edit all queued messages"),
-				hint("app.clipboard.pasteImage", "to paste image"),
-				rawKeyHint("drop files", "to attach"),
-			].join("\n");
-			const compactInstructions = [
-				hint("app.interrupt", "interrupt"),
-				rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
-				rawKeyHint("/", "commands"),
-				rawKeyHint("!", "bash"),
-				hint("app.tools.expand", "more"),
-			].join(theme.fg("muted", " · "));
-			const compactOnboarding = theme.fg(
-				"dim",
-				`Press ${keyText("app.tools.expand")} to show full startup help and loaded resources.`,
-			);
 			const onboarding = theme.fg(
 				"dim",
-				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
+				`piper can explain its own features and look up its docs. Ask it how to use or extend piper.`,
 			);
 			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
-				() => `${logo}\n${expandedInstructions}\n\n${onboarding}`,
+				() => `${logo}\n${onboarding}`,
+				() => `${logo}\n${onboarding}`,
 				this.getStartupExpansionState(),
 				1,
 				0,
@@ -581,15 +641,14 @@ export class InteractiveMode {
 			this.headerContainer.addChild(this.builtInHeader);
 		}
 
-		this.ui.addChild(this.chatContainer);
-		this.ui.addChild(this.pendingMessagesContainer);
-		this.ui.addChild(this.statusContainer);
+		this.transcriptContainer.addChild(this.chatContainer);
+		this.dockTransientContainer.addChild(this.pendingMessagesContainer);
+		this.dockTransientContainer.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
-		this.ui.addChild(this.widgetContainerAbove);
-		this.ui.addChild(this.editorContainer);
-		this.ui.addChild(this.widgetContainerBelow);
-		this.ui.addChild(this.footer);
+		this.dockTransientContainer.addChild(this.widgetContainerAbove);
+		this.dockTransientContainer.addChild(this.interactionContainer);
 		this.ui.setFocus(this.editor);
+		this.refreshDockHints();
 
 		this.setupKeyHandlers();
 		this.setupEditorSubmitHandler();
@@ -626,6 +685,245 @@ export class InteractiveMode {
 		await this.updateAvailableProviderCount();
 	}
 
+	private getMaxDockHeight(): number {
+		const terminalHeight = Math.max(1, this.ui.terminal.rows);
+		const maxByRatio = Math.max(4, Math.floor(terminalHeight * InteractiveMode.MAX_DOCK_HEIGHT_RATIO));
+		return Math.max(4, Math.min(maxByRatio, terminalHeight - InteractiveMode.MIN_TRANSCRIPT_HEIGHT));
+	}
+
+	private handleRootLayoutMeasurement(measurement: BottomDockLayoutMeasurement): void {
+		this.transcriptViewport.setHeight(measurement.topHeight);
+		this.transcriptViewport.setScrollOffset(this.transcriptScrollOffset);
+		this.sidebarComponent.setHeight(measurement.topHeight);
+	}
+
+	private setTranscriptScrollOffset(offset: number): void {
+		this.transcriptScrollOffset = Math.max(0, Math.min(offset, this.transcriptViewport.getMaxScrollOffset()));
+		this.transcriptViewport.setScrollOffset(this.transcriptScrollOffset);
+	}
+
+	private scrollTranscriptBy(lines: number): void {
+		this.cancelScrollAnim();
+		this.setTranscriptScrollOffset(this.transcriptScrollOffset + lines);
+		this.scrollTarget = this.transcriptScrollOffset;
+		this.scrollSmoothed = this.transcriptScrollOffset;
+		this.ui.requestRender();
+	}
+
+	private scrollTranscriptPage(direction: "up" | "down"): void {
+		const pageSize = Math.max(1, this.transcriptViewport.getHeight() - 2);
+		this.scrollTranscriptBy(direction === "up" ? pageSize : -pageSize);
+	}
+
+	private scrollTranscriptToBoundary(boundary: "top" | "bottom"): void {
+		this.cancelScrollAnim();
+		const offset = boundary === "top" ? this.transcriptViewport.getMaxScrollOffset() : 0;
+		this.setTranscriptScrollOffset(offset);
+		this.scrollTarget = offset;
+		this.scrollSmoothed = offset;
+		this.ui.requestRender();
+	}
+
+	private addWheelScroll(direction: "up" | "down"): void {
+		const maxOffset = this.transcriptViewport.getMaxScrollOffset();
+		const atTop = this.scrollTarget >= maxOffset && this.transcriptScrollOffset >= maxOffset;
+		const atBottom = this.scrollTarget <= 0 && this.transcriptScrollOffset <= 0;
+		if ((direction === "up" && atTop) || (direction === "down" && atBottom)) {
+			return;
+		}
+
+		const delta = direction === "up" ? 1 : -1;
+		const nextTarget = Math.max(0, Math.min(this.scrollTarget + delta, maxOffset));
+		if (nextTarget === this.scrollTarget) {
+			return;
+		}
+
+		this.scrollTarget = nextTarget;
+		if (this.scrollAnimTimer === undefined) {
+			this.tickScrollAnim();
+		}
+	}
+
+	private tickScrollAnim(): void {
+		const maxOffset = this.transcriptViewport.getMaxScrollOffset();
+		const target = Math.max(0, Math.min(this.scrollTarget, maxOffset));
+		const remaining = target - this.scrollSmoothed;
+
+		if (Math.abs(remaining) < InteractiveMode.SCROLL_EPSILON) {
+			this.scrollSmoothed = target;
+			this.scrollTarget = target;
+			const snapped = Math.round(target);
+			if (snapped !== this.transcriptScrollOffset) {
+				const prev = this.transcriptScrollOffset;
+				this.setTranscriptScrollOffset(snapped);
+				if (this.transcriptScrollOffset !== prev) {
+					this.ui.requestRender();
+				}
+			}
+			this.scrollAnimTimer = undefined;
+			return;
+		}
+
+		this.scrollSmoothed += remaining * InteractiveMode.SCROLL_LERP;
+		const newOffset = Math.round(this.scrollSmoothed);
+		if (newOffset !== this.transcriptScrollOffset) {
+			const prev = this.transcriptScrollOffset;
+			this.setTranscriptScrollOffset(newOffset);
+			if (this.transcriptScrollOffset !== prev) {
+				// Offset actually moved — render and keep animating.
+				if (Math.abs(remaining) > InteractiveMode.SCROLL_EPSILON) {
+					this.ui.requestRender();
+				}
+			} else {
+				// setTranscriptScrollOffset clamped us to the boundary.
+				// Snap and stop so we don't keep firing no-op ticks.
+				this.scrollSmoothed = this.transcriptScrollOffset;
+				this.scrollTarget = this.transcriptScrollOffset;
+				this.scrollAnimTimer = undefined;
+				return;
+			}
+		}
+
+		this.scrollAnimTimer = setTimeout(() => {
+			this.scrollAnimTimer = undefined;
+			this.tickScrollAnim();
+		}, InteractiveMode.SCROLL_ANIM_MS);
+	}
+
+	private cancelScrollAnim(): void {
+		if (this.scrollAnimTimer !== undefined) {
+			clearTimeout(this.scrollAnimTimer);
+			this.scrollAnimTimer = undefined;
+		}
+	}
+
+	private handleTranscriptInput(data: string): { consume?: boolean } | undefined {
+		if (this.keybindings.matches(data, "app.transcript.scrollUp")) {
+			this.scrollTranscriptBy(1);
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.scrollDown")) {
+			this.scrollTranscriptBy(-1);
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.pageUp")) {
+			this.scrollTranscriptPage("up");
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.pageDown")) {
+			this.scrollTranscriptPage("down");
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.scrollTop")) {
+			this.scrollTranscriptToBoundary("top");
+			return { consume: true };
+		}
+		if (this.keybindings.matches(data, "app.transcript.scrollBottom")) {
+			this.scrollTranscriptToBoundary("bottom");
+			return { consume: true };
+		}
+
+		// Alternate scroll mode (?1007h) delivers scroll wheel events as Up/Down cursor keys.
+		// Route them to transcript scroll when the default editor is active and empty.
+		if (this.editor === this.defaultEditor && this.defaultEditor.getText() === "") {
+			if (this.keybindings.matches(data, "tui.editor.cursorUp")) {
+				this.addWheelScroll("up");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "tui.editor.cursorDown")) {
+				this.addWheelScroll("down");
+				return { consume: true };
+			}
+		}
+
+		// SGR mouse wheel fallback (mode ?1000h) — kept for forward compatibility.
+		const wheelDirection = this.getWheelDirection(data);
+		if (wheelDirection !== undefined) {
+			this.addWheelScroll(wheelDirection);
+			return { consume: true };
+		}
+
+		return undefined;
+	}
+
+	private getWheelDirection(data: string): "up" | "down" | undefined {
+		const sgr = data.match(/^\x1b\[<(\d+);(\d+);(\d+)[Mm]$/);
+		if (sgr) return this.wheelButtonToDirection(Number(sgr[1]));
+		const legacy = data.match(/^\x1b\[M([\x00-\xff])([\x00-\xff])([\x00-\xff])$/);
+		if (legacy) return this.wheelButtonToDirection(legacy[1].charCodeAt(0) - 32);
+		return undefined;
+	}
+
+	private wheelButtonToDirection(button: number): "up" | "down" | undefined {
+		// Bit 6 set = wheel event; low bit: 0 = up, 1 = down.
+		if ((button & 64) === 0) return undefined;
+		return (button & 1) === 0 ? "up" : "down";
+	}
+
+	private setSidebarSectionsForKey(
+		key: string,
+		sections: ExtensionSidebarSection[] | undefined,
+		options?: ExtensionSidebarOptions,
+	): void {
+		if (!sections || sections.length === 0) {
+			this.sidebarContributions.delete(key);
+			this.applySidebarContributions();
+			return;
+		}
+
+		const existing = this.sidebarContributions.get(key);
+		this.sidebarContributions.set(key, {
+			key,
+			sections,
+			order: options?.order ?? existing?.order ?? 100,
+			sequence: existing?.sequence ?? this.sidebarContributionSequence++,
+		});
+		this.applySidebarContributions();
+	}
+
+	private getFlattenedSidebarSections(): ExtensionSidebarSection[] {
+		return Array.from(this.sidebarContributions.values())
+			.sort((a, b) => a.order - b.order || a.sequence - b.sequence)
+			.flatMap((entry) =>
+				entry.sections.map((section) => ({ ...section, order: entry.order }) as SidebarDisplaySection),
+			);
+	}
+
+	private applySidebarContributions(): void {
+		this.sidebarComponent.setResourceSections(this.getFlattenedSidebarSections());
+		this.ui.requestRender();
+	}
+
+	private clearDockInteraction(): void {
+		this.interactionContainer.clear();
+	}
+
+	private showDockInteraction(component: Component, focus: Component): void {
+		this.interactionContainer.clear();
+		this.interactionContainer.addChild(component);
+		this.dockComponent.setHideEditor(true);
+		this.ui.setFocus(focus);
+		this.ui.requestRender();
+	}
+
+	private restoreComposerFocus(): void {
+		this.clearDockInteraction();
+		this.dockComponent.setHideEditor(false);
+		this.ui.setFocus(this.editor as Component);
+		this.ui.requestRender();
+	}
+
+	private refreshDockHints(): void {
+		const hints = [
+			keyHint("app.interrupt", "interrupt"),
+			rawKeyHint(`${keyText("app.clear")}/${keyText("app.exit")}`, "clear/exit"),
+			rawKeyHint("/", "commands"),
+			rawKeyHint("!", "bash"),
+			keyHint("app.tools.expand", "more"),
+		].join(theme.fg("muted", " · "));
+		this.dockHintsText.setText(hints);
+	}
+
 	/**
 	 * Update terminal title with session name and cwd.
 	 */
@@ -633,9 +931,9 @@ export class InteractiveMode {
 		const cwdBasename = path.basename(this.sessionManager.getCwd());
 		const sessionName = this.sessionManager.getSessionName();
 		if (sessionName) {
-			this.ui.terminal.setTitle(`π - ${sessionName} - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`${APP_SYMBOL} - ${sessionName} - ${cwdBasename}`);
 		} else {
-			this.ui.terminal.setTitle(`π - ${cwdBasename}`);
+			this.ui.terminal.setTitle(`${APP_SYMBOL} - ${cwdBasename}`);
 		}
 	}
 
@@ -725,7 +1023,7 @@ export class InteractiveMode {
 		if (process.env.PI_SKIP_VERSION_CHECK || process.env.PI_OFFLINE) return undefined;
 
 		try {
-			const response = await fetch("https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest", {
+			const response = await fetch(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
 				signal: AbortSignal.timeout(10000),
 			});
 			if (!response.ok) return undefined;
@@ -1174,6 +1472,34 @@ export class InteractiveMode {
 		return this.formatDisplayPath(p);
 	}
 
+	private formatDiagnosticsCompact(label: string, diagnostics: readonly ResourceDiagnostic[]): string {
+		const errors = diagnostics.filter((d) => d.type === "error").length;
+		const warnings = diagnostics.filter((d) => d.type === "warning").length;
+		const collisions = diagnostics.filter((d) => d.type === "collision").length;
+
+		const parts: string[] = [];
+		if (errors > 0) parts.push(`${errors} error${errors > 1 ? "s" : ""}`);
+		if (warnings > 0) {
+			// Detect common message patterns for friendlier labels
+			const sampleMsg = diagnostics.find((d) => d.type === "warning")?.message ?? "";
+			const isNamingMismatch = sampleMsg.includes("does not match parent directory");
+			parts.push(
+				isNamingMismatch
+					? `${warnings} name/directory mismatch${warnings > 1 ? "es" : ""}`
+					: `${warnings} warning${warnings > 1 ? "s" : ""}`,
+			);
+		}
+		if (collisions > 0) parts.push(`${collisions} collision${collisions > 1 ? "s" : ""}`);
+
+		const severity = errors > 0 ? "error" : "warning";
+		const icon = errors > 0 ? "✗" : "⚠";
+		return (
+			theme.fg(severity, `${icon} ${label}`) +
+			theme.fg("muted", `  ${parts.join(", ")}`) +
+			theme.fg("dim", "  · /reload for details")
+		);
+	}
+
 	private formatDiagnostics(diagnostics: readonly ResourceDiagnostic[], sourceInfos: Map<string, SourceInfo>): string {
 		const lines: string[] = [];
 
@@ -1231,20 +1557,30 @@ export class InteractiveMode {
 		extensions?: Array<{ path: string; sourceInfo?: SourceInfo }>;
 		force?: boolean;
 		showDiagnosticsWhenQuiet?: boolean;
+		showFullDiagnostics?: boolean;
 	}): void {
 		const showListing = options?.force || this.options.verbose || !this.settingsManager.getQuietStartup();
 		const showDiagnostics = showListing || options?.showDiagnosticsWhenQuiet === true;
-		if (!showListing && !showDiagnostics) {
+		const showFullDiagnostics = options?.showFullDiagnostics === true;
+		const updateSidebar =
+			typeof this.sidebarComponent === "object" &&
+			this.sidebarComponent !== null &&
+			"setResourceSections" in this.sidebarComponent &&
+			typeof this.sidebarComponent.setResourceSections === "function";
+		if (!showListing && !showDiagnostics && !updateSidebar) {
 			return;
 		}
 
 		const sectionHeader = (name: string, color: ThemeColor = "mdHeading") => theme.fg(color, `[${name}]`);
-		const formatCompactList = (items: string[], options?: { sort?: boolean }): string => {
+		const formatCompactSummary = (items: string[], config?: { sort?: boolean }): string => {
 			const labels = items.map((item) => item.trim()).filter((item) => item.length > 0);
-			if (options?.sort !== false) {
+			if (config?.sort !== false) {
 				labels.sort((a, b) => a.localeCompare(b));
 			}
-			return theme.fg("dim", `  ${labels.join(", ")}`);
+			return labels.join(", ");
+		};
+		const formatCompactList = (items: string[], options?: { sort?: boolean }): string => {
+			return theme.fg("dim", `  ${formatCompactSummary(items, options)}`);
 		};
 		const addLoadedSection = (
 			name: string,
@@ -1262,6 +1598,8 @@ export class InteractiveMode {
 			this.chatContainer.addChild(section);
 			this.chatContainer.addChild(new Spacer(1));
 		};
+		const contextSidebarSections: ExtensionSidebarSection[] = [];
+		const capabilitySidebarSections: ExtensionSidebarSection[] = [];
 
 		const skillsResult = this.session.resourceLoader.getSkills();
 		const promptsResult = this.session.resourceLoader.getPrompts();
@@ -1294,18 +1632,33 @@ export class InteractiveMode {
 			}
 		}
 
-		if (showListing) {
+		if (showListing || updateSidebar) {
 			const contextFiles = this.session.resourceLoader.getAgentsFiles().agentsFiles;
 			if (contextFiles.length > 0) {
-				this.chatContainer.addChild(new Spacer(1));
-				const contextList = contextFiles
-					.map((f) => theme.fg("dim", `  ${this.formatDisplayPath(f.path)}`))
-					.join("\n");
-				const contextCompactList = formatCompactList(
+				const contextSummary = formatCompactSummary(
 					contextFiles.map((contextFile) => this.formatContextPath(contextFile.path)),
 					{ sort: false },
 				);
-				addLoadedSection("Context", contextCompactList, contextList);
+				if (updateSidebar) {
+					contextSidebarSections.push({
+						label: contextFiles.length === 1 ? "Context File" : "Context Files",
+						value: contextSummary,
+					});
+				}
+				if (!updateSidebar) {
+					this.chatContainer.addChild(new Spacer(1));
+					const contextList = contextFiles
+						.map((f) => theme.fg("dim", `  ${this.formatDisplayPath(f.path)}`))
+						.join("\n");
+					addLoadedSection(
+						"Context",
+						formatCompactList(
+							contextFiles.map((contextFile) => this.formatContextPath(contextFile.path)),
+							{ sort: false },
+						),
+						contextList,
+					);
+				}
 			}
 
 			const skills = skillsResult.skills;
@@ -1317,8 +1670,13 @@ export class InteractiveMode {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const skillCompactList = formatCompactList(skills.map((skill) => skill.name));
-				addLoadedSection("Skills", skillCompactList, skillList);
+				const skillSummary = formatCompactSummary(skills.map((skill) => skill.name));
+				if (updateSidebar) {
+					capabilitySidebarSections.push({ label: "Skills", value: skillSummary });
+				}
+				if (!updateSidebar) {
+					addLoadedSection("Skills", formatCompactList(skills.map((skill) => skill.name)), skillList);
+				}
 			}
 
 			const templates = this.session.promptTemplates;
@@ -1337,8 +1695,17 @@ export class InteractiveMode {
 						return template ? `/${template.name}` : this.formatDisplayPath(item.path);
 					},
 				});
-				const promptCompactList = formatCompactList(templates.map((template) => `/${template.name}`));
-				addLoadedSection("Prompts", promptCompactList, templateList);
+				const promptSummary = formatCompactSummary(templates.map((template) => `/${template.name}`));
+				if (updateSidebar) {
+					capabilitySidebarSections.push({ label: "Prompts", value: promptSummary });
+				}
+				if (!updateSidebar) {
+					addLoadedSection(
+						"Prompts",
+						formatCompactList(templates.map((template) => `/${template.name}`)),
+						templateList,
+					);
+				}
 			}
 
 			if (extensions.length > 0) {
@@ -1347,8 +1714,18 @@ export class InteractiveMode {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const extensionCompactList = formatCompactList(this.getCompactExtensionLabels(extensions));
-				addLoadedSection("Extensions", extensionCompactList, extList, "mdHeading");
+				const extensionSummary = formatCompactSummary(this.getCompactExtensionLabels(extensions));
+				if (updateSidebar) {
+					capabilitySidebarSections.push({ label: "Extensions", value: extensionSummary });
+				}
+				if (!updateSidebar) {
+					addLoadedSection(
+						"Extensions",
+						formatCompactList(this.getCompactExtensionLabels(extensions)),
+						extList,
+						"mdHeading",
+					);
+				}
 			}
 
 			// Show loaded themes (excluding built-in)
@@ -1365,31 +1742,55 @@ export class InteractiveMode {
 					formatPath: (item) => this.formatDisplayPath(item.path),
 					formatPackagePath: (item) => this.getShortPath(item.path, item.sourceInfo),
 				});
-				const themeCompactList = formatCompactList(
-					customThemes.map(
-						(loadedTheme) =>
-							loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
-					),
+				const themeNames = customThemes.map(
+					(loadedTheme) =>
+						loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
 				);
-				addLoadedSection("Themes", themeCompactList, themeList);
+				if (updateSidebar) {
+					capabilitySidebarSections.push({ label: "Themes", value: formatCompactSummary(themeNames) });
+				}
+				if (!updateSidebar) {
+					const themeCompactList = formatCompactList(
+						customThemes.map(
+							(loadedTheme) =>
+								loadedTheme.name ?? this.getCompactPathLabel(loadedTheme.sourcePath!, loadedTheme.sourceInfo),
+						),
+					);
+					addLoadedSection("Themes", themeCompactList, themeList);
+				}
 			}
+		}
+
+		if (updateSidebar) {
+			this.setSidebarSectionsForKey(InteractiveMode.BUILTIN_SIDEBAR_CONTEXT_KEY, contextSidebarSections, {
+				order: 30,
+			});
+			this.setSidebarSectionsForKey(InteractiveMode.BUILTIN_SIDEBAR_CAPABILITIES_KEY, capabilitySidebarSections, {
+				order: 40,
+			});
 		}
 
 		if (showDiagnostics) {
 			const skillDiagnostics = skillsResult.diagnostics;
 			if (skillDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
-				this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Skill conflicts]")}\n${warningLines}`, 0, 0));
-				this.chatContainer.addChild(new Spacer(1));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
+					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Skill issues]")}\n${warningLines}`, 0, 0));
+				} else {
+					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Skills", skillDiagnostics), 0, 0));
+				}
 			}
 
 			const promptDiagnostics = promptsResult.diagnostics;
 			if (promptDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
-				this.chatContainer.addChild(
-					new Text(`${theme.fg("warning", "[Prompt conflicts]")}\n${warningLines}`, 0, 0),
-				);
-				this.chatContainer.addChild(new Spacer(1));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Prompt issues]")}\n${warningLines}`, 0, 0),
+					);
+				} else {
+					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Prompts", promptDiagnostics), 0, 0));
+				}
 			}
 
 			const extensionDiagnostics: ResourceDiagnostic[] = [];
@@ -1408,17 +1809,34 @@ export class InteractiveMode {
 			extensionDiagnostics.push(...shortcutDiagnostics);
 
 			if (extensionDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
-				this.chatContainer.addChild(
-					new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
-				);
-				this.chatContainer.addChild(new Spacer(1));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
+					);
+				} else {
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Extensions", extensionDiagnostics), 0, 0),
+					);
+				}
 			}
 
 			const themeDiagnostics = themesResult.diagnostics;
 			if (themeDiagnostics.length > 0) {
-				const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
-				this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Theme conflicts]")}\n${warningLines}`, 0, 0));
+				if (showFullDiagnostics) {
+					const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
+					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Theme issues]")}\n${warningLines}`, 0, 0));
+				} else {
+					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Themes", themeDiagnostics), 0, 0));
+				}
+			}
+
+			const hasAny =
+				skillDiagnostics.length > 0 ||
+				promptDiagnostics.length > 0 ||
+				extensionDiagnostics.length > 0 ||
+				themeDiagnostics.length > 0;
+			if (hasAny) {
 				this.chatContainer.addChild(new Spacer(1));
 			}
 		}
@@ -1523,6 +1941,7 @@ export class InteractiveMode {
 		this.footer.setSession(this.session);
 		this.footer.setAutoCompactEnabled(this.session.autoCompactionEnabled);
 		this.footerDataProvider.setCwd(this.sessionManager.getCwd());
+		this.sidebarComponent.setSession(this.session);
 		this.hideThinkingBlock = this.settingsManager.getHideThinkingBlock();
 		this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
@@ -1534,12 +1953,14 @@ export class InteractiveMode {
 			this.editor.setPaddingX?.(editorPaddingX);
 			this.editor.setAutocompleteMaxVisible?.(autocompleteMaxVisible);
 		}
+		this.refreshDockHints();
 	}
 
 	private async handleRuntimeSessionChange(): Promise<void> {
 		this.resetExtensionUI();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
+		this.setTranscriptScrollOffset(0);
 		this.applyRuntimeSettings();
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
@@ -1559,6 +1980,7 @@ export class InteractiveMode {
 	private renderCurrentSessionState(): void {
 		this.chatContainer.clear();
 		this.pendingMessagesContainer.clear();
+		this.setTranscriptScrollOffset(0);
 		this.compactionQueuedMessages = [];
 		this.streamingComponent = undefined;
 		this.streamingMessage = undefined;
@@ -1705,10 +2127,14 @@ export class InteractiveMode {
 	}
 
 	private resetExtensionUI(): void {
-		if (this.extensionSelector) {
+		if (this.extensionSelectorCancel) {
+			this.extensionSelectorCancel();
+		} else if (this.extensionSelector) {
 			this.hideExtensionSelector();
 		}
-		if (this.extensionInput) {
+		if (this.extensionInputCancel) {
+			this.extensionInputCancel();
+		} else if (this.extensionInput) {
 			this.hideExtensionInput();
 		}
 		if (this.extensionEditor) {
@@ -1738,7 +2164,7 @@ export class InteractiveMode {
 	 */
 	private renderWidgets(): void {
 		if (!this.widgetContainerAbove || !this.widgetContainerBelow) return;
-		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, true, true);
+		this.renderWidgetContainer(this.widgetContainerAbove, this.extensionWidgetsAbove, false, false);
 		this.renderWidgetContainer(this.widgetContainerBelow, this.extensionWidgetsBelow, false, false);
 		this.ui.requestRender();
 	}
@@ -1779,21 +2205,14 @@ export class InteractiveMode {
 			this.customFooter.dispose();
 		}
 
-		// Remove current footer from UI
-		if (this.customFooter) {
-			this.ui.removeChild(this.customFooter);
-		} else {
-			this.ui.removeChild(this.footer);
-		}
-
 		if (factory) {
 			// Create and add custom footer, passing the data provider
 			this.customFooter = factory(this.ui, theme, this.footerDataProvider);
-			this.ui.addChild(this.customFooter);
+			this.dockComponent.setFooter(this.customFooter);
 		} else {
 			// Restore built-in footer
 			this.customFooter = undefined;
-			this.ui.addChild(this.footer);
+			this.dockComponent.setFooter(this.footer);
 		}
 
 		this.ui.requestRender();
@@ -1919,6 +2338,17 @@ export class InteractiveMode {
 			},
 			getToolsExpanded: () => this.toolOutputExpanded,
 			setToolsExpanded: (expanded) => this.setToolsExpanded(expanded),
+			setSidebarSections: (
+				keyOrSections: string | ExtensionSidebarSection[] | undefined,
+				sections?: ExtensionSidebarSection[] | undefined,
+				options?: ExtensionSidebarOptions,
+			) => {
+				if (typeof keyOrSections === "string") {
+					this.setSidebarSectionsForKey(keyOrSections, sections, options);
+					return;
+				}
+				this.setSidebarSectionsForKey(InteractiveMode.LEGACY_EXTENSION_SIDEBAR_KEY, keyOrSections, options);
+			},
 		};
 	}
 
@@ -1936,32 +2366,33 @@ export class InteractiveMode {
 				return;
 			}
 
-			const onAbort = () => {
-				this.hideExtensionSelector();
-				resolve(undefined);
+			let settled = false;
+			const cleanup = () => {
+				opts?.signal?.removeEventListener("abort", onAbort);
+				this.extensionSelectorCancel = undefined;
 			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			const finish = (value: string | undefined) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				this.hideExtensionSelector();
+				resolve(value);
+			};
+			const onAbort = () => finish(undefined);
 
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			this.extensionSelectorCancel = () => finish(undefined);
 			this.extensionSelector = new ExtensionSelectorComponent(
 				title,
 				options,
-				(option) => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
-					resolve(option);
-				},
-				() => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionSelector();
-					resolve(undefined);
-				},
+				(option) => finish(option),
+				() => finish(undefined),
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionSelector);
-			this.ui.setFocus(this.extensionSelector);
-			this.ui.requestRender();
+			this.showDockInteraction(this.extensionSelector, this.extensionSelector);
 		});
 	}
 
@@ -1970,11 +2401,8 @@ export class InteractiveMode {
 	 */
 	private hideExtensionSelector(): void {
 		this.extensionSelector?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
 		this.extensionSelector = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
+		this.restoreComposerFocus();
 	}
 
 	/**
@@ -2011,32 +2439,33 @@ export class InteractiveMode {
 				return;
 			}
 
-			const onAbort = () => {
-				this.hideExtensionInput();
-				resolve(undefined);
+			let settled = false;
+			const cleanup = () => {
+				opts?.signal?.removeEventListener("abort", onAbort);
+				this.extensionInputCancel = undefined;
 			};
-			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			const finish = (value: string | undefined) => {
+				if (settled) {
+					return;
+				}
+				settled = true;
+				cleanup();
+				this.hideExtensionInput();
+				resolve(value);
+			};
+			const onAbort = () => finish(undefined);
 
+			opts?.signal?.addEventListener("abort", onAbort, { once: true });
+			this.extensionInputCancel = () => finish(undefined);
 			this.extensionInput = new ExtensionInputComponent(
 				title,
 				placeholder,
-				(value) => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
-					resolve(value);
-				},
-				() => {
-					opts?.signal?.removeEventListener("abort", onAbort);
-					this.hideExtensionInput();
-					resolve(undefined);
-				},
+				(value) => finish(value.trim().length > 0 ? value : undefined),
+				() => finish(undefined),
 				{ tui: this.ui, timeout: opts?.timeout },
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionInput);
-			this.ui.setFocus(this.extensionInput);
-			this.ui.requestRender();
+			this.showDockInteraction(this.extensionInput, this.extensionInput);
 		});
 	}
 
@@ -2045,11 +2474,8 @@ export class InteractiveMode {
 	 */
 	private hideExtensionInput(): void {
 		this.extensionInput?.dispose();
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
 		this.extensionInput = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
+		this.restoreComposerFocus();
 	}
 
 	/**
@@ -2072,10 +2498,7 @@ export class InteractiveMode {
 				},
 			);
 
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.extensionEditor);
-			this.ui.setFocus(this.extensionEditor);
-			this.ui.requestRender();
+			this.showDockInteraction(this.extensionEditor, this.extensionEditor);
 		});
 	}
 
@@ -2083,11 +2506,8 @@ export class InteractiveMode {
 	 * Hide the extension editor.
 	 */
 	private hideExtensionEditor(): void {
-		this.editorContainer.clear();
-		this.editorContainer.addChild(this.editor);
 		this.extensionEditor = undefined;
-		this.ui.setFocus(this.editor);
-		this.ui.requestRender();
+		this.restoreComposerFocus();
 	}
 
 	/**
@@ -2191,11 +2611,8 @@ export class InteractiveMode {
 		const isOverlay = options?.overlay ?? false;
 
 		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
 			this.editor.setText(savedText);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
+			this.restoreComposerFocus();
 		};
 
 		return new Promise((resolve, reject) => {
@@ -2238,10 +2655,7 @@ export class InteractiveMode {
 						// Expose handle to caller for visibility control
 						options?.onHandle?.(handle);
 					} else {
-						this.editorContainer.clear();
-						this.editorContainer.addChild(component);
-						this.ui.setFocus(component);
-						this.ui.requestRender();
+						this.showDockInteraction(component, component);
 					}
 				})
 				.catch((err) => {
@@ -2318,6 +2732,7 @@ export class InteractiveMode {
 
 		// Global debug handler on TUI (works regardless of focus)
 		this.ui.onDebug = () => this.handleDebugCommand();
+		this.ui.addInputListener((data) => this.handleTranscriptInput(data));
 		this.defaultEditor.onAction("app.model.select", () => this.showModelSelector());
 		this.defaultEditor.onAction("app.tools.expand", () => this.toggleToolOutputExpansion());
 		this.defaultEditor.onAction("app.thinking.toggle", () => this.toggleThinkingBlockVisibility());
@@ -2328,6 +2743,7 @@ export class InteractiveMode {
 		this.defaultEditor.onAction("app.session.tree", () => this.showTreeSelector());
 		this.defaultEditor.onAction("app.session.fork", () => this.showUserMessageSelector());
 		this.defaultEditor.onAction("app.session.resume", () => this.showSessionSelector());
+		this.defaultEditor.onAction("app.sidebar.toggle", () => this.toggleSidebar());
 
 		this.defaultEditor.onChange = (text: string) => {
 			const wasBashMode = this.isBashMode;
@@ -2415,6 +2831,18 @@ export class InteractiveMode {
 			if (text === "/session") {
 				this.handleSessionCommand();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/vanity") {
+				this.editor.setText("");
+				const injection = await this.handleVanityCommand();
+				if (injection) {
+					this.flushPendingBashComponents();
+					if (this.onInputCallback) {
+						this.editor.addToHistory?.(injection);
+						this.onInputCallback(injection);
+					}
+				}
 				return;
 			}
 			if (text === "/changelog") {
@@ -3301,6 +3729,11 @@ export class InteractiveMode {
 		this.setToolsExpanded(!this.toolOutputExpanded);
 	}
 
+	private toggleSidebar(): void {
+		this.sidebarVisible = !this.sidebarVisible;
+		this.ui.requestRender(true);
+	}
+
 	private setToolsExpanded(expanded: boolean): void {
 		this.toolOutputExpanded = expanded;
 		const activeHeader = this.customHeader ?? this.builtInHeader;
@@ -3403,12 +3836,9 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", getUpdateInstruction("@mariozechner/pi-coding-agent"));
+		const action = theme.fg("accent", getUpdateInstruction(PACKAGE_NAME));
 		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. `) + action;
-		const changelogUrl = theme.fg(
-			"accent",
-			"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md",
-		);
+		const changelogUrl = theme.fg("accent", CHANGELOG_URL);
 		const changelogLine = theme.fg("muted", "Changelog: ") + changelogUrl;
 
 		this.chatContainer.addChild(new Spacer(1));
@@ -3633,15 +4063,10 @@ export class InteractiveMode {
 	 */
 	private showSelector(create: (done: () => void) => { component: Component; focus: Component }): void {
 		const done = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.restoreComposerFocus();
 		};
 		const { component, focus } = create(done);
-		this.editorContainer.clear();
-		this.editorContainer.addChild(component);
-		this.ui.setFocus(focus);
-		this.ui.requestRender();
+		this.showDockInteraction(component, focus);
 	}
 
 	private showSettingsSelector(): void {
@@ -4212,39 +4637,46 @@ export class InteractiveMode {
 			}
 		}
 
-		this.showSelector((done) => {
-			const selector = new OAuthSelectorComponent(
-				mode,
-				this.session.modelRegistry.authStorage,
-				async (providerId: string) => {
-					done();
+		const allProviders = getOAuthProviders();
+		if (allProviders.length === 0) {
+			this.showStatus("No OAuth providers available.");
+			return;
+		}
 
-					if (mode === "login") {
-						await this.showLoginDialog(providerId);
-					} else {
-						// Logout flow
-						const providerInfo = this.session.modelRegistry.authStorage
-							.getOAuthProviders()
-							.find((p) => p.id === providerId);
-						const providerName = providerInfo?.name || providerId;
-
-						try {
-							this.session.modelRegistry.authStorage.logout(providerId);
-							this.session.modelRegistry.refresh();
-							await this.updateAvailableProviderCount();
-							this.showStatus(`Logged out of ${providerName}`);
-						} catch (error: unknown) {
-							this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
-						}
-					}
-				},
-				() => {
-					done();
-					this.ui.requestRender();
-				},
-			);
-			return { component: selector, focus: selector };
+		const providerOptions = allProviders.map((p) => {
+			const credentials = this.session.modelRegistry.authStorage.get(p.id);
+			const isLoggedIn = credentials?.type === "oauth";
+			return {
+				id: p.id as string,
+				label: isLoggedIn ? `${p.name} (logged in)` : p.name,
+			};
 		});
+
+		const selectedLabel = await this.showExtensionSelector(
+			mode === "login" ? "Select provider to login" : "Select provider to logout",
+			providerOptions.map((option) => option.label),
+		);
+		const selectedId = providerOptions.find((option) => option.label === selectedLabel)?.id;
+
+		if (!selectedId) return;
+
+		if (mode === "login") {
+			await this.showLoginDialog(selectedId);
+		} else {
+			const providerInfo = this.session.modelRegistry.authStorage
+				.getOAuthProviders()
+				.find((p) => p.id === selectedId);
+			const providerName = providerInfo?.name || selectedId;
+
+			try {
+				this.session.modelRegistry.authStorage.logout(selectedId as OAuthProviderId);
+				this.session.modelRegistry.refresh();
+				await this.updateAvailableProviderCount();
+				this.showStatus(`Logged out of ${providerName}`);
+			} catch (error: unknown) {
+				this.showError(`Logout failed: ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 	}
 
 	private async showLoginDialog(providerId: string): Promise<void> {
@@ -4260,11 +4692,8 @@ export class InteractiveMode {
 			// Completion handled below
 		});
 
-		// Show dialog in editor container
-		this.editorContainer.clear();
-		this.editorContainer.addChild(dialog);
-		this.ui.setFocus(dialog);
-		this.ui.requestRender();
+		// Show dialog in the dock interaction slot
+		this.showDockInteraction(dialog, dialog);
 
 		// Promise for manual code input (racing with callback server)
 		let manualCodeResolve: ((code: string) => void) | undefined;
@@ -4276,10 +4705,7 @@ export class InteractiveMode {
 
 		// Restore editor helper
 		const restoreEditor = () => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
-			this.ui.requestRender();
+			this.restoreComposerFocus();
 		};
 
 		try {
@@ -4405,19 +4831,11 @@ export class InteractiveMode {
 		reloadBox.addChild(new Spacer(1));
 		reloadBox.addChild(new DynamicBorder(borderColor));
 
-		const previousEditor = this.editor;
-		this.editorContainer.clear();
-		this.editorContainer.addChild(reloadBox);
-		this.ui.setFocus(reloadBox);
+		this.showDockInteraction(reloadBox, reloadBox);
 		this.ui.requestRender(true);
 		await new Promise((resolve) => process.nextTick(resolve));
 
-		const dismissReloadBox = (editor: Component) => {
-			this.editorContainer.clear();
-			this.editorContainer.addChild(editor);
-			this.ui.setFocus(editor);
-			this.ui.requestRender();
-		};
+		const dismissReloadBox = () => this.restoreComposerFocus();
 
 		try {
 			await this.session.reload();
@@ -4449,10 +4867,11 @@ export class InteractiveMode {
 				this.setupExtensionShortcuts(runner);
 			}
 			this.rebuildChatFromMessages();
-			dismissReloadBox(this.editor as Component);
+			dismissReloadBox();
 			this.showLoadedResources({
 				force: false,
 				showDiagnosticsWhenQuiet: true,
+				showFullDiagnostics: true,
 			});
 			const modelsJsonError = this.session.modelRegistry.getError();
 			if (modelsJsonError) {
@@ -4460,7 +4879,7 @@ export class InteractiveMode {
 			}
 			this.showStatus("Reloaded keybindings, extensions, skills, prompts, themes");
 		} catch (error) {
-			dismissReloadBox(previousEditor as Component);
+			dismissReloadBox();
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
 	}
@@ -4586,16 +5005,11 @@ export class InteractiveMode {
 
 		// Show cancellable loader, replacing the editor
 		const loader = new BorderedLoader(this.ui, theme, "Creating gist...");
-		this.editorContainer.clear();
-		this.editorContainer.addChild(loader);
-		this.ui.setFocus(loader);
-		this.ui.requestRender();
+		this.showDockInteraction(loader, loader);
 
 		const restoreEditor = () => {
 			loader.dispose();
-			this.editorContainer.clear();
-			this.editorContainer.addChild(this.editor);
-			this.ui.setFocus(this.editor);
+			this.restoreComposerFocus();
 			try {
 				fs.unlinkSync(tmpFile);
 			} catch {
@@ -4690,6 +5104,69 @@ export class InteractiveMode {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new Text(theme.fg("dim", `Session name set: ${name}`), 1, 0));
 		this.ui.requestRender();
+	}
+
+	private async handleVanityCommand(): Promise<string | null> {
+		const skills = this.session.resourceLoader.getSkills().skills;
+		const branch = this.footerDataProvider.getGitBranch();
+		const contextUsage = this.session.getContextUsage();
+		const model = this.session.model;
+		const vanitySections = this.sidebarContributions.get("vanity")?.sections ?? [];
+
+		const topOptions: string[] = [];
+		const pct = contextUsage?.percent !== null ? `${contextUsage?.percent?.toFixed(1)}%` : "?";
+		if (vanitySections.length > 0) {
+			topOptions.push("Deep-dive sidebar");
+			topOptions.push("Describe context");
+			topOptions.push("Suggest next action");
+		}
+		topOptions.push(`Session Health  (${pct} context)`);
+		if (skills.length > 0) topOptions.push(`Skills  (${skills.length})`);
+		if (branch) topOptions.push(`Git  (${branch})`);
+
+		const section = await this.showExtensionSelector("Vanity — navigate session context", topOptions);
+		if (!section) return null;
+
+		if (section === "Deep-dive sidebar" || section === "Describe context" || section === "Suggest next action") {
+			const summary = vanitySections.map((entry) => `${entry.label}: ${entry.value}`).join("\n");
+			if (!summary) {
+				return null;
+			}
+
+			if (section === "Deep-dive sidebar") {
+				return `Deep-dive the current sidebar state and explain the practical implications.\n${summary}`;
+			}
+			if (section === "Describe context") {
+				return `Describe the current session context and what is consuming it.\n${summary}`;
+			}
+			return `Suggest and help me execute the best next action for this session.\n${summary}`;
+		}
+
+		if (section.startsWith("Session Health")) {
+			const modelLabel = model ? `${model.provider}/${model.id}` : "no model";
+			const contextLabel = contextUsage?.percent !== null ? `${contextUsage?.percent?.toFixed(1)}% used` : "unknown";
+			const actions = [`Back`, `Run /compact`];
+			const choice = await this.showExtensionSelector(`Session Health\n${modelLabel} · ${contextLabel}`, actions);
+			if (choice === "Run /compact") return "/compact";
+			return null;
+		}
+
+		if (section.startsWith("Skills")) {
+			const skillNames = skills.map((s) => s.name);
+			const choice = await this.showExtensionSelector(`Skills (${skills.length})`, skillNames);
+			if (!choice) return null;
+			return `Tell me about skill: ${choice}`;
+		}
+
+		if (section.startsWith("Git")) {
+			const gitOptions = ["Show recent commits", "Show dirty files", "Back"];
+			const choice = await this.showExtensionSelector(`Git · ${branch}`, gitOptions);
+			if (choice === "Show recent commits") return "Show recent git commits (run: git log --oneline -10)";
+			if (choice === "Show dirty files") return "Show git status and dirty files (run: git status)";
+			return null;
+		}
+
+		return null;
 	}
 
 	private handleSessionCommand(): void {

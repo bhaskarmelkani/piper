@@ -39,6 +39,13 @@ export interface AppKeybindings {
 	"app.session.rename": true;
 	"app.session.delete": true;
 	"app.session.deleteNoninvasive": true;
+	"app.sidebar.toggle": true;
+	"app.transcript.scrollUp": true;
+	"app.transcript.scrollDown": true;
+	"app.transcript.pageUp": true;
+	"app.transcript.pageDown": true;
+	"app.transcript.scrollTop": true;
+	"app.transcript.scrollBottom": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -134,6 +141,34 @@ export const KEYBINDINGS = {
 		defaultKeys: "ctrl+backspace",
 		description: "Delete session when query is empty",
 	},
+	"app.sidebar.toggle": {
+		defaultKeys: "ctrl+\\",
+		description: "Toggle sidebar visibility",
+	},
+	"app.transcript.scrollUp": {
+		defaultKeys: "shift+up",
+		description: "Scroll transcript up",
+	},
+	"app.transcript.scrollDown": {
+		defaultKeys: "shift+down",
+		description: "Scroll transcript down",
+	},
+	"app.transcript.pageUp": {
+		defaultKeys: "shift+pageUp",
+		description: "Scroll transcript one page up",
+	},
+	"app.transcript.pageDown": {
+		defaultKeys: "shift+pageDown",
+		description: "Scroll transcript one page down",
+	},
+	"app.transcript.scrollTop": {
+		defaultKeys: "shift+home",
+		description: "Scroll transcript to oldest content",
+	},
+	"app.transcript.scrollBottom": {
+		defaultKeys: "shift+end",
+		description: "Scroll transcript to newest content",
+	},
 } as const satisfies KeybindingDefinitions;
 
 const KEYBINDING_NAME_MIGRATIONS = {
@@ -196,6 +231,12 @@ const KEYBINDING_NAME_MIGRATIONS = {
 	renameSession: "app.session.rename",
 	deleteSession: "app.session.delete",
 	deleteSessionNoninvasive: "app.session.deleteNoninvasive",
+	transcriptScrollUp: "app.transcript.scrollUp",
+	transcriptScrollDown: "app.transcript.scrollDown",
+	transcriptPageUp: "app.transcript.pageUp",
+	transcriptPageDown: "app.transcript.pageDown",
+	transcriptScrollTop: "app.transcript.scrollTop",
+	transcriptScrollBottom: "app.transcript.scrollBottom",
 } as const satisfies Record<string, Keybinding>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -302,4 +343,4 @@ export class KeybindingsManager extends TuiKeybindingsManager {
 	}
 }
 
-export type { Keybinding, KeyId, KeybindingsConfig };
+export type { Keybinding, KeybindingsConfig, KeyId };

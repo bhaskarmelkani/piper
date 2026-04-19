@@ -216,6 +216,16 @@ export class Container implements Component {
  */
 export class TUI extends Container {
 	public terminal: Terminal;
+	private lastDiffSignature:
+		| {
+				viewportTop: number;
+				firstChanged: number;
+				renderEnd: number;
+				newLength: number;
+				previousLength: number;
+				content: string;
+		  }
+		| undefined;
 	private previousLines: string[] = [];
 	private previousWidth = 0;
 	private previousHeight = 0;
@@ -227,7 +237,7 @@ export class TUI extends Container {
 	private renderRequested = false;
 	private renderTimer: NodeJS.Timeout | undefined;
 	private lastRenderAt = 0;
-	private static readonly MIN_RENDER_INTERVAL_MS = 16;
+	private static readonly MIN_RENDER_INTERVAL_MS = 8;
 	private cursorRow = 0; // Logical cursor row (end of rendered content)
 	private hardwareCursorRow = 0; // Actual terminal cursor row (may differ due to IME positioning)
 	private showHardwareCursor = process.env.PI_HARDWARE_CURSOR === "1";
@@ -916,6 +926,7 @@ export class TUI extends Container {
 
 		// Helper to clear scrollback and viewport and render all new lines
 		const fullRender = (clear: boolean): void => {
+			this.lastDiffSignature = undefined;
 			this.fullRedrawCount += 1;
 			let buffer = "\x1b[?2026h"; // Begin synchronized output
 			if (clear) buffer += "\x1b[2J\x1b[H\x1b[3J"; // Clear screen, home, then clear scrollback
@@ -1097,6 +1108,30 @@ export class TUI extends Container {
 		// Only render changed lines (firstChanged to lastChanged), not all lines to end
 		// This reduces flicker when only a single line changes (e.g., spinner animation)
 		const renderEnd = Math.min(lastChanged, newLines.length - 1);
+		const diffSignature = {
+			viewportTop: prevViewportTop,
+			firstChanged,
+			renderEnd,
+			newLength: newLines.length,
+			previousLength: this.previousLines.length,
+			content: newLines.slice(firstChanged, renderEnd + 1).join("\n"),
+		};
+		if (
+			this.lastDiffSignature &&
+			this.lastDiffSignature.viewportTop === diffSignature.viewportTop &&
+			this.lastDiffSignature.firstChanged === diffSignature.firstChanged &&
+			this.lastDiffSignature.renderEnd === diffSignature.renderEnd &&
+			this.lastDiffSignature.newLength === diffSignature.newLength &&
+			this.lastDiffSignature.previousLength === diffSignature.previousLength &&
+			this.lastDiffSignature.content === diffSignature.content
+		) {
+			this.positionHardwareCursor(cursorPos, newLines.length);
+			this.previousLines = newLines;
+			this.previousWidth = width;
+			this.previousHeight = height;
+			this.previousViewportTop = prevViewportTop;
+			return;
+		}
 		for (let i = firstChanged; i <= renderEnd; i++) {
 			if (i > firstChanged) buffer += "\r\n";
 			buffer += "\x1b[2K"; // Clear current line
@@ -1198,6 +1233,7 @@ export class TUI extends Container {
 		// Position hardware cursor for IME
 		this.positionHardwareCursor(cursorPos, newLines.length);
 
+		this.lastDiffSignature = diffSignature;
 		this.previousLines = newLines;
 		this.previousWidth = width;
 		this.previousHeight = height;

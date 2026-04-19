@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `Viewport` and `BottomDockLayout` primitives for height-aware fixed-shell terminal layouts.
+
 ## [0.67.68] - 2026-04-17
 
 ## [0.67.67] - 2026-04-17

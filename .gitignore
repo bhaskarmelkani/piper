@@ -38,3 +38,7 @@ plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh
+
+# macOS Finder copy artifacts
+node_modules 2/
+bun 2.lock

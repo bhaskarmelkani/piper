@@ -75,8 +75,8 @@ import type {
 } from "../tools/index.js";
 
 export type { ExecOptions, ExecResult } from "../exec.js";
-export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 export type { AppKeybinding, KeybindingsManager } from "../keybindings.js";
+export type { AgentToolResult, AgentToolUpdateCallback, ToolExecutionMode };
 
 // ============================================================================
 // UI Context
@@ -97,6 +97,17 @@ export type WidgetPlacement = "aboveEditor" | "belowEditor";
 export interface ExtensionWidgetOptions {
 	/** Where the widget is rendered. Defaults to "aboveEditor". */
 	placement?: WidgetPlacement;
+}
+
+export interface ExtensionSidebarSection {
+	label: string;
+	value: string;
+	color?: string;
+}
+
+export interface ExtensionSidebarOptions {
+	/** Lower values render earlier in the sidebar. Defaults to 100. */
+	order?: number;
 }
 
 /** Raw terminal input listener for extensions. */
@@ -240,6 +251,23 @@ export interface ExtensionUIContext {
 
 	/** Set tool output expansion state. */
 	setToolsExpanded(expanded: boolean): void;
+
+	/**
+	 * Replace or clear the sections for a single sidebar contributor.
+	 * Multiple contributors are merged deterministically by order, then registration time.
+	 */
+	setSidebarSections(
+		key: string,
+		sections: ExtensionSidebarSection[] | undefined,
+		options?: ExtensionSidebarOptions,
+	): void;
+
+	/**
+	 * Replace the sidebar's resource sections with custom content.
+	 * Pass undefined to clear the legacy contributor.
+	 * Deprecated: prefer the keyed overload above.
+	 */
+	setSidebarSections(sections: ExtensionSidebarSection[] | undefined): void;
 }
 
 // ============================================================================
