@@ -207,6 +207,8 @@ export interface InteractiveModeOptions {
 	initialMessages?: string[];
 	/** Force verbose startup (overrides quietStartup setting) */
 	verbose?: boolean;
+	/** Optional note rendered in the TUI header (e.g. model scope) */
+	startupNote?: string;
 }
 
 export class InteractiveMode {
@@ -607,11 +609,6 @@ export class InteractiveMode {
 		// Load changelog (only show new entries, skip for resumed sessions)
 		this.changelogMarkdown = this.getChangelogForDisplay();
 
-		// Ensure fd and rg are available (downloads if missing, adds to PATH via getBinDir)
-		// Both are needed: fd for autocomplete, rg for grep tool and bash commands
-		const [fdPath] = await Promise.all([ensureTool("fd"), ensureTool("rg")]);
-		this.fdPath = fdPath;
-
 		// Add fixed shell layout as the single top-level child of the TUI.
 		this.ui.addChild(this.rootLayout);
 
@@ -630,9 +627,10 @@ export class InteractiveMode {
 				"dim",
 				`piper can explain its own features and look up its docs. Ask it how to use or extend piper.`,
 			);
+			const note = this.options.startupNote ? `\n${theme.fg("dim", this.options.startupNote)}` : "";
 			this.builtInHeader = new ExpandableText(
-				() => `${logo}\n${onboarding}`,
-				() => `${logo}\n${onboarding}`,
+				() => `${logo}\n${onboarding}${note}`,
+				() => `${logo}\n${onboarding}${note}`,
 				this.getStartupExpansionState(),
 				SHELL_LEFT_INSET,
 				0,
@@ -664,6 +662,12 @@ export class InteractiveMode {
 		// Start the UI before initializing extensions so session_start handlers can use interactive dialogs
 		this.ui.start();
 		this.isInitialized = true;
+
+		// Resolve fd/rg in the background — not needed until the user invokes file search or grep.
+		// Use silent mode to suppress download messages that would corrupt the TUI output.
+		Promise.all([ensureTool("fd", true), ensureTool("rg", true)]).then(([fdPath]) => {
+			this.fdPath = fdPath;
+		});
 
 		// Initialize extensions first so resources are shown before messages
 		await this.bindCurrentSessionExtensions();

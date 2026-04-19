@@ -19,6 +19,7 @@ import { getAgentDir, getModelsPath, VERSION } from "./config.js";
 import { type CreateAgentSessionRuntimeFactory, createAgentSessionRuntime } from "./core/agent-session-runtime.js";
 import {
 	type AgentSessionRuntimeDiagnostic,
+	type AgentSessionServices,
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "./core/agent-session-services.js";
@@ -518,32 +519,39 @@ export async function main(args: string[], options?: MainOptions) {
 	const resolvedPromptTemplatePaths = resolveCliPaths(cwd, parsed.promptTemplates);
 	const resolvedThemePaths = resolveCliPaths(cwd, parsed.themes);
 	const authStorage = AuthStorage.create();
+	let cachedServices: AgentSessionServices | undefined;
 	const createRuntime: CreateAgentSessionRuntimeFactory = async ({
 		cwd,
 		agentDir,
 		sessionManager,
 		sessionStartEvent,
 	}) => {
-		const services = await createAgentSessionServices({
-			cwd,
-			agentDir,
-			authStorage,
-			extensionFlagValues: parsed.unknownFlags,
-			resourceLoaderOptions: {
-				additionalExtensionPaths: resolvedExtensionPaths,
-				additionalSkillPaths: resolvedSkillPaths,
-				additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
-				additionalThemePaths: resolvedThemePaths,
-				noExtensions: parsed.noExtensions,
-				noSkills: parsed.noSkills,
-				noPromptTemplates: parsed.noPromptTemplates,
-				noThemes: parsed.noThemes,
-				noContextFiles: parsed.noContextFiles,
-				systemPrompt: parsed.systemPrompt,
-				appendSystemPrompt: parsed.appendSystemPrompt,
-				extensionFactories: options?.extensionFactories,
-			},
-		});
+		let services: AgentSessionServices;
+		if (cachedServices && cachedServices.cwd === cwd) {
+			services = cachedServices;
+		} else {
+			services = await createAgentSessionServices({
+				cwd,
+				agentDir,
+				authStorage,
+				extensionFlagValues: parsed.unknownFlags,
+				resourceLoaderOptions: {
+					additionalExtensionPaths: resolvedExtensionPaths,
+					additionalSkillPaths: resolvedSkillPaths,
+					additionalPromptTemplatePaths: resolvedPromptTemplatePaths,
+					additionalThemePaths: resolvedThemePaths,
+					noExtensions: parsed.noExtensions,
+					noSkills: parsed.noSkills,
+					noPromptTemplates: parsed.noPromptTemplates,
+					noThemes: parsed.noThemes,
+					noContextFiles: parsed.noContextFiles,
+					systemPrompt: parsed.systemPrompt,
+					appendSystemPrompt: parsed.appendSystemPrompt,
+					extensionFactories: options?.extensionFactories,
+				},
+			});
+			cachedServices = services;
+		}
 		const { settingsManager, modelRegistry, resourceLoader } = services;
 		const diagnostics: AgentSessionRuntimeDiagnostic[] = [
 			...services.diagnostics,
@@ -683,6 +691,7 @@ export async function main(args: string[], options?: MainOptions) {
 		printTimings();
 		await runRpcMode(runtime);
 	} else if (appMode === "interactive") {
+		let startupNote: string | undefined;
 		if (scopedModels.length > 0 && (parsed.verbose || !settingsManager.getQuietStartup())) {
 			const modelList = scopedModels
 				.map((sm) => {
@@ -690,7 +699,7 @@ export async function main(args: string[], options?: MainOptions) {
 					return `${sm.model.id}${thinkingStr}`;
 				})
 				.join(", ");
-			console.log(chalk.dim(`Model scope: ${modelList} ${chalk.gray("(Ctrl+P to cycle)")}`));
+			startupNote = `Model scope: ${modelList} (Ctrl+P to cycle)`;
 		}
 
 		const interactiveMode = new InteractiveMode(runtime, {
@@ -700,6 +709,7 @@ export async function main(args: string[], options?: MainOptions) {
 			initialImages,
 			initialMessages: parsed.messages,
 			verbose: parsed.verbose,
+			startupNote,
 		});
 		if (startupBenchmark) {
 			await interactiveMode.init();
