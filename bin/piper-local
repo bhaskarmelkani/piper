@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Runs piper from local source — for development use.
+# Install: ln -sf "$(pwd)/bin/piper-local" ~/.local/bin/piper-local
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+    SOURCE="$(readlink "$SOURCE")"
+done
+REPO_DIR="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+exec bun "$REPO_DIR/packages/coding-agent/src/bun/cli.ts" "$@"

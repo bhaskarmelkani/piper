@@ -395,32 +395,14 @@ async function generateInsight(
 
 export function buildVanitySidebarSections(analysis: VanityAnalysis, contextPercent: number | null): SidebarSection[] {
 	const healthPrefix = contextPercent !== null ? `${contextPercent.toFixed(1)}% used` : "usage unknown";
-	const sections: SidebarSection[] = [
+	const health = `${healthPrefix} · ${analysis.insight.sidebar}${analysis.isStale ? " (stale)" : ""}`;
+	return [
 		{
 			label: "Session Health",
-			value: `${healthPrefix} · ${analysis.insight.sidebar}`,
+			value: health,
 			color: contextPercent !== null && contextPercent >= 80 ? "warning" : "success",
 		},
-		{ label: "Focus", value: analysis.insight.focus, color: "accent" },
-		{
-			label: "Breakdown",
-			value: formatDominantSummary(analysis.breakdown),
-		},
 	];
-
-	if (analysis.insight.nextAction) {
-		sections.push({ label: "Next", value: analysis.insight.nextAction, color: "warning" });
-	}
-
-	if (analysis.isStale) {
-		sections.push({
-			label: "Analysis",
-			value: `stale by ${analysis.staleTurns} turn${analysis.staleTurns === 1 ? "" : "s"}`,
-			color: "warning",
-		});
-	}
-
-	return sections;
 }
 
 function buildInjectedPrompt(kind: "deep-dive" | "context" | "next-action", analysis: VanityAnalysis): string {

@@ -1,25 +1,26 @@
 # Development Rules
 
-## Pico Context
+## Piper Context
 
-- This repo is evolving pi into `pico`, a polished terminal app built on pi.
+- This repo is `piper` — a polished terminal coding agent forked from [pi](https://github.com/badlogic/pi-mono).
+- npm package: `piper-ai`. Binary command: `piper`. Local dev command: `piper-local`.
+- **Piper is built on pi's core.** The packages `@mariozechner/pi-ai`, `@mariozechner/pi-tui`, `@mariozechner/pi-agent-core` are pi's engine — do not rename or rewrite them. Keep them compatible with the pi ecosystem.
+- **Only rename or change things in `packages/coding-agent`** — that is the piper layer. Everything else is upstream pi and stays as-is unless there is a concrete bug or incompatibility to fix.
 - Do not treat BetterCode as the source repo to preserve or migrate.
 - Use BetterCode only as a source of UX taste and terminal interaction learnings.
 - The main product work is in `packages/coding-agent`, not a runtime rewrite.
 - Prefer polishing pi's existing TUI and workflows over adding OpenCode-style complexity.
-- `pico` should keep pi's engine, sessions, extensions, themes, and core compatibility where practical.
-- Carry over these product choices into `pico`:
+- Piper keeps pi's engine, sessions, extensions, themes, and core compatibility.
+- Product design choices:
   - transcript-first shell
   - composer docked to the bottom
   - visible model and thinking state
   - calmer transcript hierarchy
-  - better prompt/question/approval ergonomics
-  - contextual right sidebar
+  - contextual right sidebar (high-level only; details via `/vanity`)
   - strong streaming, scroll, and resize stability
-- Prefer `clack` for transient guided interactions like selectors, confirms, settings, and login/provider flows.
 - Do not use `clack` to replace the main transcript, streaming output, docked editor, or arbitrary extension custom UI.
-- Primary implementation plan: `plans/v000/README.md`
-- Keep `plans/v000/README.md` updated as the execution tracker using milestone TODO format:
+- Active implementation plan: `plans/v0.0.1/README.md`
+- Keep the plan updated as the execution tracker using milestone TODO format:
   - `[ ]` not started
   - `[~]` in progress
   - `[x]` done
@@ -94,27 +95,27 @@ When closing issues via commit:
 
 ## Testing pi Interactive Mode with tmux
 
-To test pi's TUI in a controlled terminal environment:
+To test piper's TUI in a controlled terminal environment:
 
 ```bash
 # Create tmux session with specific dimensions
-tmux new-session -d -s pi-test -x 80 -y 24
+tmux new-session -d -s piper-test -x 80 -y 24
 
-# Start pi from source
-tmux send-keys -t pi-test "cd /Users/badlogic/workspaces/pi-mono && ./pi-test.sh" Enter
+# Start piper from source
+tmux send-keys -t piper-test "piper-local" Enter
 
 # Wait for startup, then capture output
-sleep 3 && tmux capture-pane -t pi-test -p
+sleep 3 && tmux capture-pane -t piper-test -p
 
 # Send input
-tmux send-keys -t pi-test "your prompt here" Enter
+tmux send-keys -t piper-test "your prompt here" Enter
 
 # Send special keys
-tmux send-keys -t pi-test Escape
-tmux send-keys -t pi-test C-o  # ctrl+o
+tmux send-keys -t piper-test Escape
+tmux send-keys -t piper-test C-o  # ctrl+o
 
 # Cleanup
-tmux kill-session -t pi-test
+tmux kill-session -t piper-test
 ```
 
 ## Changelog
@@ -141,8 +142,8 @@ Use these sections under `## [Unreleased]`:
 
 ### Attribution
 
-- **Internal changes (from issues)**: `Fixed foo bar ([#123](https://github.com/badlogic/pi-mono/issues/123))`
-- **External contributions**: `Added feature X ([#456](https://github.com/badlogic/pi-mono/pull/456) by [@username](https://github.com/username))`
+- **Internal changes (from issues)**: `Fixed foo bar ([#123](https://github.com/bhaskarmelkani/piper/issues/123))`
+- **External contributions**: `Added feature X ([#456](https://github.com/bhaskarmelkani/piper/pull/456) by [@username](https://github.com/username))`
 
 ## Adding a New LLM Provider (packages/ai)
 

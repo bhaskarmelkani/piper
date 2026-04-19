@@ -1,5 +1,11 @@
 # Upstream Sync
 
+## Quick Start
+
+Run `/fetch-upstream` in your Claude Code session. It will fetch from upstream, show what changed, categorize pi core vs piper layer, and merge cleanly.
+
+The upstream remote is `https://github.com/badlogic/pi-mono.git` (alias: `upstream`).
+
 This repo carries piper-specific UX and runtime decisions on top of upstream pi. Keep upstream syncs reviewable by separating product behavior from runtime mechanics.
 
 ## Conflict Surfaces

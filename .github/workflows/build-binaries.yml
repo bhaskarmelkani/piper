@@ -58,16 +58,16 @@ jobs:
           gh release create "${RELEASE_TAG}" \
             --title "${RELEASE_TAG}" \
             --notes-file /tmp/release-notes.md \
-            pi-darwin-arm64.tar.gz \
-            pi-darwin-x64.tar.gz \
-            pi-linux-x64.tar.gz \
-            pi-linux-arm64.tar.gz \
-            pi-windows-x64.zip \
+            piper-darwin-arm64.tar.gz \
+            piper-darwin-x64.tar.gz \
+            piper-linux-x64.tar.gz \
+            piper-linux-arm64.tar.gz \
+            piper-windows-x64.zip \
             2>/dev/null || \
           gh release upload "${RELEASE_TAG}" \
-            pi-darwin-arm64.tar.gz \
-            pi-darwin-x64.tar.gz \
-            pi-linux-x64.tar.gz \
-            pi-linux-arm64.tar.gz \
-            pi-windows-x64.zip \
+            piper-darwin-arm64.tar.gz \
+            piper-darwin-x64.tar.gz \
+            piper-linux-x64.tar.gz \
+            piper-linux-arm64.tar.gz \
+            piper-windows-x64.zip \
             --clobber
