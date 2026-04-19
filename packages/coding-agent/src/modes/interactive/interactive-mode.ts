@@ -649,6 +649,7 @@ export class InteractiveMode {
 		}
 
 		this.transcriptContainer.addChild(this.chatContainer);
+		this.transcriptContainer.addChild(new Spacer(1));
 		this.dockTransientContainer.addChild(this.pendingMessagesContainer);
 		this.dockTransientContainer.addChild(this.statusContainer);
 		this.renderWidgets(); // Initialize with default spacer
