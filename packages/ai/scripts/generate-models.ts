@@ -53,6 +53,33 @@ const COPILOT_STATIC_HEADERS = {
 	"Copilot-Integration-Id": "vscode-chat",
 } as const;
 
+/**
+ * Premium request multipliers for GitHub Copilot models (paid plans).
+ * Source: https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers
+ * Update this table when the docs page changes.
+ */
+const COPILOT_MULTIPLIERS: Record<string, number> = {
+	"claude-haiku-4.5": 0.33,
+	"claude-opus-4.5": 3,
+	"claude-opus-4.6": 3,
+	"claude-opus-4.7": 7.5,
+	"claude-sonnet-4": 1,
+	"claude-sonnet-4.5": 1,
+	"claude-sonnet-4.6": 1,
+	"gemini-2.5-pro": 1,
+	"gemini-3-flash-preview": 0.33,
+	"gemini-3.1-pro-preview": 1,
+	"gpt-4.1": 0,
+	"gpt-4o": 0,
+	"gpt-5-mini": 0,
+	"gpt-5.2": 1,
+	"gpt-5.2-codex": 1,
+	"gpt-5.3-codex": 1,
+	"gpt-5.4": 1,
+	"gpt-5.4-mini": 0.33,
+	"grok-code-fast-1": 0.25,
+};
+
 const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1";
 const AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
 const ZAI_TOOL_STREAM_UNSUPPORTED_MODELS = new Set(["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4.5v"]);
@@ -539,6 +566,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						? "openai-responses"
 						: "openai-completions";
 
+				const copilotMultiplier = COPILOT_MULTIPLIERS[modelId];
 				const copilotModel: Model<any> = {
 					id: modelId,
 					name: m.name || modelId,
@@ -556,6 +584,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					contextWindow: m.limit?.context || 128000,
 					maxTokens: m.limit?.output || 8192,
 					headers: { ...COPILOT_STATIC_HEADERS },
+					...(copilotMultiplier !== undefined ? { multiplier: copilotMultiplier } : {}),
 					// compat only applies to openai-completions
 					...(api === "openai-completions" ? {
 						compat: {

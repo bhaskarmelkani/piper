@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added GitHub Copilot model multipliers to the model selector. Multiplier values (e.g. `x0`, `x0.33`, `x1`, `x3`) are shown next to each model name so users can see the premium request cost at a glance. The static table is sourced from the [GitHub Copilot billing docs](https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers) and is updated at build time via `generate-models`. The live Copilot API is used as the authoritative source when available; the static table is the fallback.
+- Added grouping and sorting in the model selector. Models are sorted by provider then family (e.g. `claude-opus`, `claude-sonnet`, `gpt-5`) and a dim group header appears between families when no search filter is active.
+- Added spacing between sidebar sections. Built-in fields (Model, Thinking, Workspace, Git, Status) and extension-provided sections are now separated by blank lines for easier scanning.
+
+### Fixed
+
+- Fixed the interactive composer to show a dim placeholder when empty and use a padded default left margin instead of rendering flush against the dock border.
+
 ## [0.1.0] - 2026-04-19 - 2026-04-19
 
 ### Changed

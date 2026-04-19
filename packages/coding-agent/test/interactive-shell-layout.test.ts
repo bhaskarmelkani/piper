@@ -1,4 +1,4 @@
-import { Container } from "@mariozechner/pi-tui";
+import { Container, CURSOR_MARKER, type TUI } from "@mariozechner/pi-tui";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { BottomDockLayout } from "../../tui/src/components/bottom-dock-layout.js";
 import { HorizontalSplit } from "../../tui/src/components/horizontal-split.js";
@@ -11,11 +11,13 @@ import {
 } from "../examples/extensions/copilot-budget.js";
 import type { AgentSession } from "../src/core/agent-session.js";
 import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provider.js";
+import { KeybindingsManager } from "../src/core/keybindings.js";
+import { CustomEditor } from "../src/modes/interactive/components/custom-editor.js";
 import { renderDiff } from "../src/modes/interactive/components/diff.js";
 import { ShellDockComponent } from "../src/modes/interactive/components/shell-dock.js";
 import { ShellSidebarComponent } from "../src/modes/interactive/components/shell-sidebar.js";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
-import { initTheme } from "../src/modes/interactive/theme/theme.js";
+import { getEditorTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
 
 function lineComponent(...lines: string[]) {
 	return {
@@ -134,9 +136,31 @@ describe("interactive shell layout primitives", () => {
 		expect(dock.render(80)).toEqual(["hints", "transient-1", "transient-2", "editor-1", "editor-2", "footer"]);
 	});
 
+	it("renders a padded placeholder for an empty composer", () => {
+		const tui = {
+			terminal: { rows: 24, columns: 80 },
+			requestRender: vi.fn(),
+		} as unknown as TUI;
+		const editor = new CustomEditor(tui, getEditorTheme(), KeybindingsManager.create(), {
+			paddingX: 1,
+			placeholder: "Ask piper, add @files, or use /commands",
+		});
+
+		editor.focused = true;
+
+		const rendered = editor.render(40);
+		const composerLine = rendered[1] ?? "";
+		expect(rendered).toHaveLength(3);
+		expect(composerLine).toContain(CURSOR_MARKER);
+		expect(composerLine).toContain("Ask piper");
+		expect(composerLine).toContain("@files");
+		expect(composerLine.startsWith(" ")).toBe(true);
+		expect(visibleWidth(composerLine)).toBe(40);
+	});
+
 	it("renders a full-height sidebar with contextual sections", () => {
 		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
-		sidebar.setHeight(26);
+		sidebar.setHeight(30);
 		sidebar.setResourceSections([
 			{ label: "Copilot Budget", value: "25%", order: 20, color: "success" } as any,
 			{ label: "Premium", value: "25 / 100 requests", order: 20 } as any,
@@ -145,7 +169,7 @@ describe("interactive shell layout primitives", () => {
 		]);
 
 		const rendered = sidebar.render(30).join("\n");
-		expect(sidebar.render(30)).toHaveLength(26);
+		expect(sidebar.render(30)).toHaveLength(30);
 		expect(rendered).toContain("claude-sonnet-4.6");
 		expect(rendered).toContain("Investigate Copilot sidebar");
 		expect(rendered).toContain("Usage");
@@ -177,7 +201,7 @@ describe("interactive shell layout primitives", () => {
 
 	it("uses dividers and short workspace labels in the sidebar", () => {
 		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
-		sidebar.setHeight(20);
+		sidebar.setHeight(24);
 		const rendered = sidebar.render(30).join("\n");
 		expect(rendered).toContain("─");
 		expect(rendered).toContain("Workspace");

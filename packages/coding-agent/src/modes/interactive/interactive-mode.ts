@@ -169,6 +169,8 @@ type SidebarDisplaySection = ExtensionSidebarSection & { order?: number };
 
 const ANTHROPIC_SUBSCRIPTION_AUTH_WARNING =
 	"Anthropic subscription auth is active. Third-party usage now draws from extra usage and is billed per token, not your Claude plan limits. Manage extra usage at https://claude.ai/settings/usage.";
+const DEFAULT_COMPOSER_PLACEHOLDER = "Ask piper, add @files, or use /commands";
+const SHELL_LEFT_INSET = 1;
 
 function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {
 	return typeof apiKey === "string" && apiKey.startsWith("sk-ant-oat");
@@ -381,7 +383,7 @@ export class InteractiveMode {
 		this.widgetContainerBelow = new Container();
 		this.interactionContainer = new Container();
 		this.dockTransientContainer = new Container();
-		this.dockHintsText = new Text("", 0, 0);
+		this.dockHintsText = new Text("", SHELL_LEFT_INSET, 0);
 		this.dockHints = new Container();
 		this.dockHints.addChild(new Spacer(1));
 		this.dockHints.addChild(this.dockHintsText);
@@ -398,6 +400,8 @@ export class InteractiveMode {
 		this.defaultEditor = new CustomEditor(this.ui, getEditorTheme(), this.keybindings, {
 			paddingX: editorPaddingX,
 			autocompleteMaxVisible,
+			placeholder: DEFAULT_COMPOSER_PLACEHOLDER,
+			placeholderStyle: (text: string) => theme.fg("dim", text),
 		});
 		this.editor = this.defaultEditor;
 		this.editorContainer = new Container();
@@ -628,7 +632,7 @@ export class InteractiveMode {
 				() => `${logo}\n${onboarding}`,
 				() => `${logo}\n${onboarding}`,
 				this.getStartupExpansionState(),
-				1,
+				SHELL_LEFT_INSET,
 				0,
 			);
 
@@ -1596,7 +1600,7 @@ export class InteractiveMode {
 				() => `${sectionHeader(name, color)}\n${collapsedBody}`,
 				() => `${sectionHeader(name, color)}\n${expandedBody}`,
 				this.getStartupExpansionState(),
-				0,
+				SHELL_LEFT_INSET,
 				0,
 			);
 			this.chatContainer.addChild(section);
@@ -1779,9 +1783,13 @@ export class InteractiveMode {
 			if (skillDiagnostics.length > 0) {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(skillDiagnostics, sourceInfos);
-					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Skill issues]")}\n${warningLines}`, 0, 0));
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Skill issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
+					);
 				} else {
-					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Skills", skillDiagnostics), 0, 0));
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Skills", skillDiagnostics), SHELL_LEFT_INSET, 0),
+					);
 				}
 			}
 
@@ -1790,10 +1798,12 @@ export class InteractiveMode {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(promptDiagnostics, sourceInfos);
 					this.chatContainer.addChild(
-						new Text(`${theme.fg("warning", "[Prompt issues]")}\n${warningLines}`, 0, 0),
+						new Text(`${theme.fg("warning", "[Prompt issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
 					);
 				} else {
-					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Prompts", promptDiagnostics), 0, 0));
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Prompts", promptDiagnostics), SHELL_LEFT_INSET, 0),
+					);
 				}
 			}
 
@@ -1816,11 +1826,11 @@ export class InteractiveMode {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(extensionDiagnostics, sourceInfos);
 					this.chatContainer.addChild(
-						new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, 0, 0),
+						new Text(`${theme.fg("warning", "[Extension issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
 					);
 				} else {
 					this.chatContainer.addChild(
-						new Text(this.formatDiagnosticsCompact("Extensions", extensionDiagnostics), 0, 0),
+						new Text(this.formatDiagnosticsCompact("Extensions", extensionDiagnostics), SHELL_LEFT_INSET, 0),
 					);
 				}
 			}
@@ -1829,9 +1839,13 @@ export class InteractiveMode {
 			if (themeDiagnostics.length > 0) {
 				if (showFullDiagnostics) {
 					const warningLines = this.formatDiagnostics(themeDiagnostics, sourceInfos);
-					this.chatContainer.addChild(new Text(`${theme.fg("warning", "[Theme issues]")}\n${warningLines}`, 0, 0));
+					this.chatContainer.addChild(
+						new Text(`${theme.fg("warning", "[Theme issues]")}\n${warningLines}`, SHELL_LEFT_INSET, 0),
+					);
 				} else {
-					this.chatContainer.addChild(new Text(this.formatDiagnosticsCompact("Themes", themeDiagnostics), 0, 0));
+					this.chatContainer.addChild(
+						new Text(this.formatDiagnosticsCompact("Themes", themeDiagnostics), SHELL_LEFT_INSET, 0),
+					);
 				}
 			}
 

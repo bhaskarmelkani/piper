@@ -1,11 +1,26 @@
-import { Editor, type EditorOptions, type EditorTheme, type TUI } from "@mariozechner/pi-tui";
+import {
+	CURSOR_MARKER,
+	Editor,
+	type EditorOptions,
+	type EditorTheme,
+	type TUI,
+	truncateToWidth,
+	visibleWidth,
+} from "@mariozechner/pi-tui";
 import type { AppKeybinding, KeybindingsManager } from "../../../core/keybindings.js";
+
+export interface CustomEditorOptions extends EditorOptions {
+	placeholder?: string;
+	placeholderStyle?: (text: string) => string;
+}
 
 /**
  * Custom editor that handles app-level keybindings for coding-agent.
  */
 export class CustomEditor extends Editor {
 	private keybindings: KeybindingsManager;
+	private placeholder?: string;
+	private placeholderStyle: (text: string) => string;
 	public actionHandlers: Map<AppKeybinding, () => void> = new Map();
 
 	// Special handlers that can be dynamically replaced
@@ -15,9 +30,11 @@ export class CustomEditor extends Editor {
 	/** Handler for extension-registered shortcuts. Returns true if handled. */
 	public onExtensionShortcut?: (data: string) => boolean;
 
-	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options?: EditorOptions) {
+	constructor(tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager, options: CustomEditorOptions = {}) {
 		super(tui, theme, options);
 		this.keybindings = keybindings;
+		this.placeholder = options.placeholder;
+		this.placeholderStyle = options.placeholderStyle ?? ((text) => text);
 	}
 
 	/**
@@ -25,6 +42,34 @@ export class CustomEditor extends Editor {
 	 */
 	onAction(action: AppKeybinding, handler: () => void): void {
 		this.actionHandlers.set(action, handler);
+	}
+
+	setPlaceholder(placeholder?: string): void {
+		if (this.placeholder !== placeholder) {
+			this.placeholder = placeholder;
+			this.tui.requestRender();
+		}
+	}
+
+	override render(width: number): string[] {
+		const rendered = super.render(width);
+		if (!this.placeholder || this.getText().length > 0 || this.isShowingAutocomplete() || rendered.length < 3) {
+			return rendered;
+		}
+
+		const maxPadding = Math.max(0, Math.floor((width - 1) / 2));
+		const paddingX = Math.min(this.getPaddingX(), maxPadding);
+		const contentWidth = Math.max(1, width - paddingX * 2);
+		const leftPadding = " ".repeat(paddingX);
+		const rightPadding = leftPadding;
+		const reservedCursorWidth = this.focused ? 1 : 0;
+		const placeholderWidth = Math.max(0, contentWidth - reservedCursorWidth);
+		const truncatedPlaceholder = truncateToWidth(this.placeholderStyle(this.placeholder), placeholderWidth);
+		const trailingSpaces = " ".repeat(Math.max(0, placeholderWidth - visibleWidth(truncatedPlaceholder)));
+		const cursorPrefix = this.focused ? `${CURSOR_MARKER}\x1b[7m \x1b[0m` : "";
+
+		rendered[1] = `${leftPadding}${cursorPrefix}${truncatedPlaceholder}${trailingSpaces}${rightPadding}`;
+		return rendered;
 	}
 
 	handleInput(data: string): void {
