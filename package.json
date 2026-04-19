@@ -31,6 +31,8 @@
 		"prepublishOnly": "bun run clean && bun run build && bun run check",
 		"publish": "bun run prepublishOnly && npm publish -ws --access public",
 		"publish:dry": "bun run prepublishOnly && npm publish -ws --access public --dry-run",
+		"publish:piper": "node scripts/publish-piper.mjs",
+		"publish:piper:dry": "node scripts/publish-piper.mjs --dry-run",
 		"release:patch": "bun scripts/release.mjs patch",
 		"release:minor": "bun scripts/release.mjs minor",
 		"release:major": "bun scripts/release.mjs major",
@@ -50,7 +52,7 @@
 	"engines": {
 		"bun": ">=1.3.11"
 	},
-	"version": "0.0.3",
+	"version": "0.0.1",
 	"dependencies": {
 		"@mariozechner/jiti": "^2.6.5",
 		"get-east-asian-width": "^1.4.0"
