@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * Publish piper-ai to npm.
  *
@@ -6,7 +6,7 @@
  * resolution (extensions and jiti depend on it). This script temporarily renames
  * it to piper-ai for the publish, then restores it.
  *
- * Usage: node scripts/publish-piper.mjs [--dry-run]
+ * Usage: bun scripts/publish-piper.mjs [--dry-run]
  */
 import { execSync } from "child_process";
 import { readFileSync, writeFileSync } from "fs";
@@ -31,7 +31,7 @@ try {
 	writeFileSync(PKG_PATH, JSON.stringify(modified, null, "\t") + "\n");
 
 	const cmd = [
-		"npm publish --access public",
+		"bun publish --access public",
 		DRY_RUN ? "--dry-run" : "",
 	].filter(Boolean).join(" ");
 

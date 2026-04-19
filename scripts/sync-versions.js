@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 
 /**
  * Syncs ALL @mariozechner/* package dependency versions to match their current versions.
@@ -38,9 +38,9 @@ const versions = new Set(Object.values(versionMap));
 if (versions.size > 1) {
 	console.error('\n❌ ERROR: Not all packages have the same version!');
 	console.error('Expected lockstep versioning. Run one of:');
-	console.error('  npm run version:patch');
-	console.error('  npm run version:minor');
-	console.error('  npm run version:major');
+	console.error('  bun run version:patch');
+	console.error('  bun run version:minor');
+	console.error('  bun run version:major');
 	process.exit(1);
 }
 

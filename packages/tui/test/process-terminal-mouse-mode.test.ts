@@ -102,7 +102,7 @@ describe("ProcessTerminal mouse mode", () => {
 
 		assert.ok(writes.includes("\x1b[?1049h\x1b[2J\x1b[H"));
 		assert.ok(writes.includes("\x1b[?2004h"));
-		assert.ok(writes.includes("\x1b[?1002l\x1b[?1003l\x1b[?1007l\x1b[?1006h\x1b[?1000h"));
+		assert.ok(writes.includes("\x1b[?1002l\x1b[?1003l\x1b[?1000l\x1b[?1006l\x1b[?1007h"));
 		assert.ok(writes.includes("\x1b[?u"));
 		assert.deepStrictEqual(rawModes, [true]);
 		assert.ok(stdoutListeners.some((entry) => entry.event === "resize"));

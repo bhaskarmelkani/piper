@@ -5,7 +5,9 @@
 	"type": "module",
 	"piConfig": {
 		"name": "piper",
-		"configDir": ".pi"
+		"configDir": ".pi",
+		"npmPackage": "piper-ai",
+		"changelogUrl": "https://github.com/bhaskarmelkani/piper/blob/main/packages/coding-agent/CHANGELOG.md"
 	},
 	"bin": {
 		"piper": "dist/cli.js"
@@ -95,7 +97,6 @@
 		"directory": "packages/coding-agent"
 	},
 	"engines": {
-		"node": ">=18",
 		"bun": ">=1.3.11"
 	}
 }

@@ -45,11 +45,13 @@ import { spawn, spawnSync } from "child_process";
 import {
 	APP_NAME,
 	APP_SYMBOL,
+	CHANGELOG_URL,
 	getAgentDir,
 	getAuthPath,
 	getDebugLogPath,
 	getShareViewerUrl,
 	getUpdateInstruction,
+	PACKAGE_NAME,
 	VERSION,
 } from "../../config.js";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
@@ -821,9 +823,20 @@ export class InteractiveMode {
 			return { consume: true };
 		}
 
-		// Trackpad/wheel scroll: animate toward target using lerp to smooth out
-		// Node.js stdin batching (multiple events per read → jitter without lerp).
-		// Non-wheel button events (clicks) return undefined so the editor receives them.
+		// Alternate scroll mode (?1007h) delivers scroll wheel events as Up/Down cursor keys.
+		// Route them to transcript scroll when the default editor is active and empty.
+		if (this.editor === this.defaultEditor && this.defaultEditor.getText() === "") {
+			if (this.keybindings.matches(data, "tui.editor.cursorUp")) {
+				this.addWheelScroll("up");
+				return { consume: true };
+			}
+			if (this.keybindings.matches(data, "tui.editor.cursorDown")) {
+				this.addWheelScroll("down");
+				return { consume: true };
+			}
+		}
+
+		// SGR mouse wheel fallback (mode ?1000h) — kept for forward compatibility.
 		const wheelDirection = this.getWheelDirection(data);
 		if (wheelDirection !== undefined) {
 			this.addWheelScroll(wheelDirection);
@@ -1010,7 +1023,7 @@ export class InteractiveMode {
 		if (process.env.PI_SKIP_VERSION_CHECK || process.env.PI_OFFLINE) return undefined;
 
 		try {
-			const response = await fetch("https://registry.npmjs.org/@mariozechner/pi-coding-agent/latest", {
+			const response = await fetch(`https://registry.npmjs.org/${PACKAGE_NAME}/latest`, {
 				signal: AbortSignal.timeout(10000),
 			});
 			if (!response.ok) return undefined;
@@ -3823,12 +3836,9 @@ export class InteractiveMode {
 	}
 
 	showNewVersionNotification(newVersion: string): void {
-		const action = theme.fg("accent", getUpdateInstruction("@mariozechner/pi-coding-agent"));
+		const action = theme.fg("accent", getUpdateInstruction(PACKAGE_NAME));
 		const updateInstruction = theme.fg("muted", `New version ${newVersion} is available. `) + action;
-		const changelogUrl = theme.fg(
-			"accent",
-			"https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md",
-		);
+		const changelogUrl = theme.fg("accent", CHANGELOG_URL);
 		const changelogLine = theme.fg("muted", "Changelog: ") + changelogUrl;
 
 		this.chatContainer.addChild(new Spacer(1));

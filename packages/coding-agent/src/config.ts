@@ -188,6 +188,9 @@ export const APP_NAME: string = pkg.piConfig?.name || "pi";
 export const APP_SYMBOL = "∏";
 export const CONFIG_DIR_NAME: string = pkg.piConfig?.configDir || ".pi";
 export const VERSION: string = pkg.version;
+export const PACKAGE_NAME: string = pkg.piConfig?.npmPackage || pkg.name;
+export const CHANGELOG_URL: string =
+	pkg.piConfig?.changelogUrl || "https://github.com/badlogic/pi-mono/blob/main/packages/coding-agent/CHANGELOG.md";
 
 // Keep PI_ prefix for backward compatibility during staged rebrand to piper.
 // Users who set PI_CODING_AGENT_DIR in their environment will continue to work.
