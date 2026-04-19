@@ -203,10 +203,6 @@ export function buildCopilotSidebarSections(data: CopilotUsageData | null): Exte
 			value: `${data.percent}%`,
 			color: getBudgetColor(data.percent),
 		},
-		{
-			label: "Premium",
-			value: data.unlimited ? `${data.used} used (unlimited)` : `${data.used} / ${data.entitlement} requests`,
-		},
 	];
 
 	if (data.overageCount > 0) {

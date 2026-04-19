@@ -26,6 +26,10 @@ function lineComponent(...lines: string[]) {
 	};
 }
 
+function stripAnsi(value: string | undefined): string {
+	return (value ?? "").replace(/\u001b\[[0-9;]*m/g, "");
+}
+
 function createSession(): AgentSession {
 	const session = {
 		model: {
@@ -156,6 +160,34 @@ describe("interactive shell layout primitives", () => {
 		expect(composerLine).toContain("@files");
 		expect(composerLine.startsWith(" ")).toBe(true);
 		expect(visibleWidth(composerLine)).toBe(40);
+		expect(rendered[2]).toBe(" ".repeat(40));
+	});
+
+	it("keeps slash-command autocomplete but drops the lower composer rule", () => {
+		const tui = {
+			terminal: { rows: 24, columns: 80 },
+			requestRender: vi.fn(),
+		} as unknown as TUI;
+		const editor = new CustomEditor(tui, getEditorTheme(), KeybindingsManager.create(), {
+			paddingX: 1,
+			placeholder: "Ask piper, add @files, or use /commands",
+		});
+
+		editor.setText("/");
+		editor.focused = true;
+		Object.assign(editor as unknown as object, {
+			autocompleteState: "regular",
+			autocompleteList: {
+				render: () => ["> settings", "  model"],
+			},
+		});
+
+		const rendered = editor.render(40);
+		expect(rendered).toHaveLength(5);
+		expect(rendered[1]).toContain("/");
+		expect(rendered[2]).toBe(" ".repeat(40));
+		expect(rendered[3]).toContain("> settings");
+		expect(rendered[4]).toContain("model");
 	});
 
 	it("renders a full-height sidebar with contextual sections", () => {
@@ -163,7 +195,6 @@ describe("interactive shell layout primitives", () => {
 		sidebar.setHeight(30);
 		sidebar.setResourceSections([
 			{ label: "Copilot Budget", value: "25%", order: 20, color: "success" } as any,
-			{ label: "Premium", value: "25 / 100 requests", order: 20 } as any,
 			{ label: "Context File", value: "AGENTS.md", order: 30 } as any,
 			{ label: "Skills", value: "review, write", order: 40 } as any,
 		]);
@@ -172,9 +203,9 @@ describe("interactive shell layout primitives", () => {
 		expect(sidebar.render(30)).toHaveLength(30);
 		expect(rendered).toContain("claude-sonnet-4.6");
 		expect(rendered).toContain("Investigate Copilot sidebar");
+		expect(rendered).toContain("x1");
 		expect(rendered).toContain("Usage");
 		expect(rendered).toContain("25%");
-		expect(rendered).toContain("Premium");
 		expect(rendered).toContain("main");
 		expect(rendered).toContain("Skills");
 	});
@@ -199,6 +230,18 @@ describe("interactive shell layout primitives", () => {
 		expect(rendered).toContain("123k / 1.0M");
 	});
 
+	it("adds breathing room between context usage and context resource rows", () => {
+		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
+		sidebar.setHeight(24);
+		sidebar.setResourceSections([{ label: "Context File", value: "AGENTS.md", order: 30 } as any]);
+
+		const lines = sidebar.render(30);
+		const contextSummaryIndex = lines.findIndex((line) => line.includes("123k / 1.0M"));
+		expect(contextSummaryIndex).toBeGreaterThanOrEqual(0);
+		expect(stripAnsi(lines[contextSummaryIndex + 1]).trim()).toBe("│");
+		expect(lines[contextSummaryIndex + 2]).toContain("Context File");
+	});
+
 	it("uses dividers and short workspace labels in the sidebar", () => {
 		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
 		sidebar.setHeight(24);
@@ -207,6 +250,17 @@ describe("interactive shell layout primitives", () => {
 		expect(rendered).toContain("Workspace");
 		expect(rendered).toContain("project");
 		expect(rendered).not.toContain("/Users/test/project");
+	});
+
+	it("renders workspace as a footer section with bottom padding", () => {
+		const sidebar = new ShellSidebarComponent(createSession(), createFooterData());
+		sidebar.setHeight(30);
+		const lines = sidebar.render(30);
+		const workspaceIndex = lines.findIndex((line) => stripAnsi(line).includes("Workspace"));
+		expect(workspaceIndex).toBeGreaterThanOrEqual(0);
+		expect(stripAnsi(lines[workspaceIndex - 2])).toContain("─");
+		expect(stripAnsi(lines[workspaceIndex - 1]).trim()).toBe("│");
+		expect(stripAnsi(lines.at(-1))).toBe(" ".repeat(30));
 	});
 
 	it("skips malformed sidebar sections instead of crashing", () => {
@@ -541,7 +595,6 @@ describe("copilot budget sidebar helpers", () => {
 			}),
 		).toEqual([
 			{ label: "Copilot Budget", value: "37%", color: "success" },
-			{ label: "Premium", value: "372 / 1000 requests" },
 			{ label: "Reset", value: "May 1" },
 		]);
 	});

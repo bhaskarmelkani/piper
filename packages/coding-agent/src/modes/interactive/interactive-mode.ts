@@ -42,6 +42,7 @@ import {
 	visibleWidth,
 } from "@mariozechner/pi-tui";
 import { spawn, spawnSync } from "child_process";
+import { isValidThinkingLevel } from "../../cli/args.js";
 import {
 	APP_NAME,
 	APP_SYMBOL,
@@ -107,6 +108,7 @@ import { SettingsSelectorComponent } from "./components/settings-selector.js";
 import { ShellDockComponent } from "./components/shell-dock.js";
 import { ShellSidebarComponent } from "./components/shell-sidebar.js";
 import { SkillInvocationMessageComponent } from "./components/skill-invocation-message.js";
+import { ThinkingSelectorComponent } from "./components/thinking-selector.js";
 import { ToolExecutionComponent } from "./components/tool-execution.js";
 import { TreeSelectorComponent } from "./components/tree-selector.js";
 import { UserMessageComponent } from "./components/user-message.js";
@@ -2821,6 +2823,12 @@ export class InteractiveMode {
 				await this.handleModelCommand(searchTerm);
 				return;
 			}
+			if (text === "/thinking" || text.startsWith("/thinking ")) {
+				const level = text.startsWith("/thinking ") ? text.slice(10).trim() : undefined;
+				this.editor.setText("");
+				this.handleThinkingCommand(level);
+				return;
+			}
 			if (text === "/export" || text.startsWith("/export ")) {
 				await this.handleExportCommand(text);
 				this.editor.setText("");
@@ -4222,6 +4230,56 @@ export class InteractiveMode {
 				},
 			);
 			return { component: selector, focus: selector.getSettingsList() };
+		});
+	}
+
+	private handleThinkingCommand(levelText?: string): void {
+		if (!levelText) {
+			this.showThinkingSelector();
+			return;
+		}
+
+		if (!isValidThinkingLevel(levelText)) {
+			this.showError(`Invalid thinking level "${levelText}". Valid values: off, minimal, low, medium, high, xhigh`);
+			return;
+		}
+
+		const availableLevels = this.session.getAvailableThinkingLevels();
+		if (!availableLevels.includes(levelText)) {
+			if (availableLevels.length === 1 && availableLevels[0] === "off") {
+				this.showStatus("Current model does not support thinking");
+			} else {
+				this.showError(
+					`Thinking level "${levelText}" is not available for the current model. Available: ${availableLevels.join(", ")}`,
+				);
+			}
+			return;
+		}
+
+		this.session.setThinkingLevel(levelText);
+		this.footer.invalidate();
+		this.updateEditorBorderColor();
+		this.showStatus(`Thinking level: ${levelText}`);
+	}
+
+	private showThinkingSelector(): void {
+		this.showSelector((done) => {
+			const selector = new ThinkingSelectorComponent(
+				this.session.thinkingLevel,
+				this.session.getAvailableThinkingLevels(),
+				(level) => {
+					this.session.setThinkingLevel(level);
+					this.footer.invalidate();
+					this.updateEditorBorderColor();
+					done();
+					this.showStatus(`Thinking level: ${level}`);
+				},
+				() => {
+					done();
+					this.ui.requestRender();
+				},
+			);
+			return { component: selector, focus: selector.getSelectList() };
 		});
 	}
 

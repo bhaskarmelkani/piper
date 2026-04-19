@@ -3,6 +3,7 @@ import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from "@mariozechner/p
 import type { AgentSession } from "../../../core/agent-session.js";
 import type { ExtensionSidebarSection } from "../../../core/extensions/types.js";
 import type { ReadonlyFooterDataProvider } from "../../../core/footer-data-provider.js";
+import { COPILOT_MULTIPLIERS } from "../../../utils/copilot-model-policies.js";
 import { type ThemeColor, theme } from "../theme/theme.js";
 import {
 	formatContextSummary,
@@ -118,6 +119,20 @@ function formatWorkspaceName(cwd: string): string {
 	return parts.at(-1) ?? cwd;
 }
 
+function getModelProviderBadge(model: AgentSession["model"]): string {
+	if (!model) {
+		return theme.fg("muted", "unresolved");
+	}
+
+	if (model.provider !== "github-copilot") {
+		return theme.fg("dim", `(${model.provider})`);
+	}
+
+	const multiplier = COPILOT_MULTIPLIERS[model.id];
+	const multiplierBadge = multiplier !== undefined ? ` · x${multiplier}` : "";
+	return theme.fg("dim", `(${model.provider}${multiplierBadge})`);
+}
+
 export class ShellSidebarComponent implements Component {
 	private height = 0;
 	private resourceSections: SidebarDisplaySection[] = [];
@@ -149,6 +164,7 @@ export class ShellSidebarComponent implements Component {
 		const contentWidth = Math.max(1, width - 2);
 		const border = theme.fg("muted", "│");
 		const blank = `${border} ${" ".repeat(contentWidth)}`;
+		const borderlessBlank = " ".repeat(width);
 		const divider = `${border} ${theme.fg("borderMuted", "─".repeat(contentWidth))}`;
 		const wrapLine = (text: string): string[] => {
 			const wrapped = wrapTextWithAnsi(text, contentWidth);
@@ -238,9 +254,7 @@ export class ShellSidebarComponent implements Component {
 
 		const model = this.session.model;
 		if (model) {
-			headerGroup.push(
-				...labeledSection("Model", `${theme.fg("text", model.id)} ${theme.fg("dim", `(${model.provider})`)}`),
-			);
+			headerGroup.push(...labeledSection("Model", `${theme.fg("text", model.id)} ${getModelProviderBadge(model)}`));
 		} else {
 			headerGroup.push(...labeledSection("Model", theme.fg("muted", "unresolved")));
 		}
@@ -293,7 +307,11 @@ export class ShellSidebarComponent implements Component {
 		} else if (contextUsage) {
 			contextGroup.push(...compactSection("Context", theme.fg("muted", formatContextSummary(contextUsage))));
 		}
-		contextGroup.push(...renderExtensionSections(contextSections));
+		const renderedContextSections = renderExtensionSections(contextSections);
+		if (contextGroup.length > 0 && renderedContextSections.length > 0) {
+			contextGroup.push(blank);
+		}
+		contextGroup.push(...renderedContextSections);
 		if (contextGroup.length > 0) {
 			topGroups.push(contextGroup);
 		}
@@ -331,12 +349,35 @@ export class ShellSidebarComponent implements Component {
 
 		const topLines = joinGroups(topGroups);
 		const bottomLines = joinGroups(bottomGroups);
-
 		const maxBottomHeight = Math.max(0, this.height - topLines.length);
 		const visibleBottomLines = bottomLines.slice(Math.max(0, bottomLines.length - maxBottomHeight));
-		const spacerHeight = Math.max(0, this.height - topLines.length - visibleBottomLines.length);
+		let spacerHeight = Math.max(0, this.height - topLines.length - visibleBottomLines.length);
+		const footerSectionPrefix: string[] = [];
+		const footerPadding: string[] = [];
 
-		const lines = [...topLines, ...Array.from({ length: spacerHeight }, () => blank), ...visibleBottomLines];
+		if (bottomLines.length > 0 && spacerHeight > 0) {
+			footerPadding.push(borderlessBlank);
+			spacerHeight -= 1;
+		}
+		if (topLines.length > 0 && bottomLines.length > 0 && spacerHeight > 0) {
+			footerSectionPrefix.push(divider);
+			spacerHeight -= 1;
+			if (spacerHeight > 0) {
+				footerSectionPrefix.push(blank);
+				spacerHeight -= 1;
+			}
+		} else if (bottomLines.length > 0 && spacerHeight > 0) {
+			footerSectionPrefix.push(blank);
+			spacerHeight -= 1;
+		}
+
+		const lines = [
+			...topLines,
+			...Array.from({ length: spacerHeight }, () => blank),
+			...footerSectionPrefix,
+			...visibleBottomLines,
+			...footerPadding,
+		];
 		return lines.slice(0, this.height);
 	}
 }

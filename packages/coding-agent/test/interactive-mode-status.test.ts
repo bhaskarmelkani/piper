@@ -99,6 +99,79 @@ describe("InteractiveMode.setToolsExpanded", () => {
 	});
 });
 
+describe("InteractiveMode.handleThinkingCommand", () => {
+	test("opens the thinking selector when no level is provided", () => {
+		const fakeThis: any = {
+			showThinkingSelector: vi.fn(),
+		};
+
+		(InteractiveMode as any).prototype.handleThinkingCommand.call(fakeThis);
+
+		expect(fakeThis.showThinkingSelector).toHaveBeenCalledTimes(1);
+	});
+
+	test("applies a valid thinking level and refreshes related UI", () => {
+		const fakeThis: any = {
+			session: {
+				getAvailableThinkingLevels: vi.fn(() => ["off", "minimal", "low", "medium", "high", "xhigh"]),
+				setThinkingLevel: vi.fn(),
+			},
+			footer: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+		};
+
+		(InteractiveMode as any).prototype.handleThinkingCommand.call(fakeThis, "high");
+
+		expect(fakeThis.session.setThinkingLevel).toHaveBeenCalledWith("high");
+		expect(fakeThis.footer.invalidate).toHaveBeenCalledTimes(1);
+		expect(fakeThis.updateEditorBorderColor).toHaveBeenCalledTimes(1);
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Thinking level: high");
+		expect(fakeThis.showError).not.toHaveBeenCalled();
+	});
+
+	test("shows an error for invalid thinking levels", () => {
+		const fakeThis: any = {
+			session: {
+				getAvailableThinkingLevels: vi.fn(() => ["off", "minimal", "low", "medium", "high", "xhigh"]),
+				setThinkingLevel: vi.fn(),
+			},
+			footer: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+		};
+
+		(InteractiveMode as any).prototype.handleThinkingCommand.call(fakeThis, "turbo");
+
+		expect(fakeThis.session.setThinkingLevel).not.toHaveBeenCalled();
+		expect(fakeThis.showError).toHaveBeenCalledWith(
+			'Invalid thinking level "turbo". Valid values: off, minimal, low, medium, high, xhigh',
+		);
+		expect(fakeThis.showStatus).not.toHaveBeenCalled();
+	});
+
+	test("shows a status when the current model does not support thinking", () => {
+		const fakeThis: any = {
+			session: {
+				getAvailableThinkingLevels: vi.fn(() => ["off"]),
+				setThinkingLevel: vi.fn(),
+			},
+			footer: { invalidate: vi.fn() },
+			updateEditorBorderColor: vi.fn(),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+		};
+
+		(InteractiveMode as any).prototype.handleThinkingCommand.call(fakeThis, "high");
+
+		expect(fakeThis.session.setThinkingLevel).not.toHaveBeenCalled();
+		expect(fakeThis.showStatus).toHaveBeenCalledWith("Current model does not support thinking");
+		expect(fakeThis.showError).not.toHaveBeenCalled();
+	});
+});
+
 describe("InteractiveMode.createExtensionUIContext setTheme", () => {
 	test("persists theme changes to settings manager", () => {
 		initTheme("dark");
@@ -212,6 +285,8 @@ describe("InteractiveMode.showLoadedResources", () => {
 			) => (InteractiveMode as any).prototype.getCompactNonPackageExtensionLabel.call(fakeThis, p, index, allPaths),
 			getCompactExtensionLabels: (extensions: ExtensionFixture[]) =>
 				(InteractiveMode as any).prototype.getCompactExtensionLabels.call(fakeThis, extensions),
+			formatDiagnosticsCompact: (label: string, diagnostics: Array<{ type: "warning" | "error" | "collision" }>) =>
+				(InteractiveMode as any).prototype.formatDiagnosticsCompact.call(fakeThis, label, diagnostics),
 			formatDiagnostics: () => "diagnostics",
 			getBuiltInCommandConflictDiagnostics: () => [],
 		};
@@ -409,7 +484,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  @scope/pi-scoped, answer.ts, cli-extension.ts, HazAT/pi-interactive-subagents, HazAT/pi-interactive-subagents:subagents, local-index/index.ts, pi-markdown-preview, user-index/index.ts"`);
+   @scope/pi-scoped, answer.ts, cli-extension.ts, HazAT/pi-interactive-subagents, HazAT/pi-interactive-subagents:subagents, local-index/index.ts, pi-markdown-preview, user-index/index.ts"`);
 	});
 
 	test("adds more parent folders until local extension labels are unique", () => {
@@ -455,7 +530,7 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  alpha/one/index.ts, beta/one/index.ts, gamma/one/index.ts"`);
+   alpha/one/index.ts, beta/one/index.ts, gamma/one/index.ts"`);
 	});
 
 	test("captures mixed extension layouts in expanded output", () => {
@@ -472,20 +547,20 @@ describe("InteractiveMode.showLoadedResources", () => {
 
 		expect(normalizeRenderedOutput(fakeThis.chatContainer)).toMatchInlineSnapshot(`
 "[Extensions]
-  project
-    /tmp/project/.pi/extensions/answer.ts
-    /tmp/project/.pi/extensions/local-index/index.ts
-    git:github.com/HazAT/pi-interactive-subagents
-      extensions/index.ts
-      extensions/subagents/index.ts
-    npm:@scope/pi-scoped
-      extensions/index.ts
-    npm:pi-markdown-preview
-      extensions/index.ts
-  user
-    /tmp/agent/extensions/user-index/index.ts
-  path
-    /tmp/temp/cli-extension.ts"`);
+   project
+     /tmp/project/.pi/extensions/answer.ts
+     /tmp/project/.pi/extensions/local-index/index.ts
+     git:github.com/HazAT/pi-interactive-subagents
+       extensions/index.ts
+       extensions/subagents/index.ts
+     npm:@scope/pi-scoped
+       extensions/index.ts
+     npm:pi-markdown-preview
+       extensions/index.ts
+   user
+     /tmp/agent/extensions/user-index/index.ts
+   path
+     /tmp/temp/cli-extension.ts"`);
 	});
 
 	test("shows context paths relative to cwd while preserving full external paths", () => {
@@ -555,8 +630,8 @@ describe("InteractiveMode.showLoadedResources", () => {
 			showDiagnosticsWhenQuiet: true,
 		});
 
-		const output = renderAll(fakeThis.chatContainer);
-		expect(output).toContain("[Skill conflicts]");
+		const output = renderAll(fakeThis.chatContainer).replace(/\u001b\[[0-9;]*m/g, "");
+		expect(output).toContain("⚠ Skills");
 		expect(output).not.toContain("[Skills]");
 	});
 });
