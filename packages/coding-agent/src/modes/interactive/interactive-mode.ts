@@ -351,12 +351,14 @@ export class InteractiveMode {
 	private static readonly SCROLL_ANIM_MS = 8;
 	private static readonly SCROLL_LERP = 0.4;
 
-	// Sidebar visibility state (actual display also depends on terminal width)
+	// Whether the sidebar is currently visible. Auto-hidden below SIDEBAR_MIN_TERMINAL_WIDTH regardless.
 	private sidebarVisible = true;
 	private sidebarContributions = new Map<string, SidebarContribution>();
 	private sidebarContributionSequence = 0;
 
 	private static readonly SIDEBAR_WIDTH = 30;
+	// Right padding kept when sidebar is hidden so transcript text doesn't run to the terminal edge.
+	private static readonly SIDEBAR_HIDDEN_PADDING = 2;
 	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
 	private static readonly MIN_TRANSCRIPT_HEIGHT = 6;
 	private static readonly MAX_DOCK_HEIGHT_RATIO = 0.4;
@@ -945,6 +947,7 @@ export class InteractiveMode {
 			rawKeyHint("/", "commands"),
 			rawKeyHint("!", "bash"),
 			keyHint("app.tools.expand", "more"),
+			keyHint("app.sidebar.toggle", "sidebar"),
 		].join(theme.fg("muted", " · "));
 		this.dockHintsText.setText(hints);
 	}
@@ -3786,6 +3789,10 @@ export class InteractiveMode {
 
 	private toggleSidebar(): void {
 		this.sidebarVisible = !this.sidebarVisible;
+		// When hidden, keep a small right margin so transcript text doesn't reach the terminal edge.
+		this.shellLayout.setRightWidth(
+			this.sidebarVisible ? InteractiveMode.SIDEBAR_WIDTH : InteractiveMode.SIDEBAR_HIDDEN_PADDING,
+		);
 		this.ui.requestRender(true);
 	}
 
