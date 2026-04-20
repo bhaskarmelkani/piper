@@ -192,6 +192,15 @@ function hasDefaultModelProvider(providerId: string): providerId is keyof typeof
 	return providerId in defaultModelPerProvider;
 }
 
+function isNewerVersion(candidate: string, current: string): boolean {
+	const parse = (v: string) => v.split(".").map((n) => parseInt(n, 10) || 0);
+	const [cMaj, cMin, cPat] = parse(candidate);
+	const [rMaj, rMin, rPat] = parse(current);
+	if (cMaj !== rMaj) return cMaj > rMaj;
+	if (cMin !== rMin) return cMin > rMin;
+	return cPat > rPat;
+}
+
 /**
  * Options for InteractiveMode initialization.
  */
@@ -1047,7 +1056,7 @@ export class InteractiveMode {
 			const data = (await response.json()) as { version?: string };
 			const latestVersion = data.version;
 
-			if (latestVersion && latestVersion !== this.version) {
+			if (latestVersion && isNewerVersion(latestVersion, this.version)) {
 				return latestVersion;
 			}
 
