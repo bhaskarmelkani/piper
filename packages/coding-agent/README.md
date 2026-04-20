@@ -105,7 +105,7 @@ See [docs/providers.md](docs/providers.md) for detailed setup instructions.
 
 ## Interactive Mode
 
-<p align="center"><img src="docs/images/interactive-mode.png" alt="Interactive Mode" width="600"></p>
+<p align="center"><img src="docs/images/piper-v040.png" alt="Piper v0.4.0" width="800"></p>
 
 The interface from top to bottom:
 
@@ -206,8 +206,6 @@ pi --fork <path>       # Fork specific session file or ID into a new session
 
 **`/tree`** - Navigate the session tree in-place. Select any previous point, continue from there, and switch between branches. All history preserved in a single file.
 
-<p align="center"><img src="docs/images/tree-view.png" alt="Tree View" width="600"></p>
-
 - Search by typing, fold/unfold and jump between branches with Ctrl+←/Ctrl+→ or Alt+←/Alt+→, page with ←/→
 - Filter modes (Ctrl+O): default → no-tools → user-only → labeled-only → all
 - Press Shift+L to label entries as bookmarks and Shift+T to toggle label timestamps
@@ -291,8 +289,6 @@ Use this skill when the user asks about X.
 Place in `~/.pi/agent/skills/`, `~/.agents/skills/`, `.pi/skills/`, or `.agents/skills/` (from `cwd` up through parent directories) or a [pi package](#pi-packages) to share with others. See [docs/skills.md](docs/skills.md).
 
 ### Extensions
-
-<p align="center"><img src="docs/images/doom-extension.png" alt="Doom Extension" width="600"></p>
 
 TypeScript modules that extend pi with custom tools, commands, keyboard shortcuts, event handlers, and UI components.
 
