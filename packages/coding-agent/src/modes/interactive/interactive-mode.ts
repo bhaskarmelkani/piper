@@ -2042,6 +2042,7 @@ export class InteractiveMode {
 			sessionManager: this.sessionManager,
 			modelRegistry: this.session.modelRegistry,
 			model: this.session.model,
+			getThinkingLevel: () => this.session.thinkingLevel,
 			isIdle: () => !this.session.isStreaming,
 			signal: this.session.agent.signal,
 			abort: () => this.session.abort(),

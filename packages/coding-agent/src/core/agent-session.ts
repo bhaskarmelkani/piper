@@ -46,6 +46,7 @@ import { createToolHtmlRenderer } from "./export-html/tool-renderer.js";
 import {
 	type ContextUsage,
 	type ExtensionCommandContextActions,
+	type ExtensionContext,
 	type ExtensionErrorListener,
 	ExtensionRunner,
 	type ExtensionUIContext,
@@ -76,6 +77,7 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
+import { buildSubagentSchedulerPlan } from "./subagents/scheduler.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
@@ -263,6 +265,7 @@ export class AgentSession {
 	private _retryAttempt = 0;
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
+	private _turnMutationStarted = false;
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -364,6 +367,9 @@ export class AgentSession {
 	 */
 	private _installAgentToolHooks(): void {
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
+			if (toolCall.name === "edit" || toolCall.name === "write") {
+				this._turnMutationStarted = true;
+			}
 			const runner = this._extensionRunner;
 			if (!runner?.hasHandlers("tool_call")) {
 				return undefined;
@@ -1023,8 +1029,31 @@ export class AgentSession {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
-			// Build messages array (custom message if any, then user message)
+			this._turnMutationStarted = false;
+
+			// Build messages array (scheduler/custom context first, then user message)
 			messages = [];
+
+			const schedulerPlan = buildSubagentSchedulerPlan({
+				cwd: this._cwd,
+				prompt: expandedText,
+				activeToolNames: this.getActiveToolNames(),
+				mutationStarted: this._turnMutationStarted,
+			});
+			if (schedulerPlan) {
+				messages.push({
+					role: "custom",
+					customType: "subagent_scheduler",
+					content: schedulerPlan.note,
+					display: false,
+					details: {
+						mode: schedulerPlan.mode,
+						reason: schedulerPlan.reason,
+						tasks: schedulerPlan.tasks,
+					},
+					timestamp: Date.now(),
+				});
+			}
 
 			// Add user message
 			const userContent: (TextContent | ImageContent)[] = [{ type: "text", text: expandedText }];
@@ -2200,6 +2229,7 @@ export class AgentSession {
 			},
 			{
 				getModel: () => this.model,
+				getThinkingLevel: () => this.thinkingLevel,
 				isIdle: () => !this.isStreaming,
 				getSignal: () => this.agent.signal,
 				abort: () => this.abort(),
@@ -2285,7 +2315,7 @@ export class AgentSession {
 		const toolRegistry = new Map(
 			Array.from(this._baseToolDefinitions.values()).map((definition) => [
 				definition.name,
-				wrapToolDefinition(definition),
+				wrapToolDefinition(definition, () => this._extensionRunner?.createContext() as ExtensionContext),
 			]),
 		);
 		for (const tool of wrappedExtensionTools as AgentTool[]) {

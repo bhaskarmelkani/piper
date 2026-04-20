@@ -73,6 +73,15 @@ export {
 	searchCodeToolDefinition,
 } from "./search-code.js";
 export {
+	createSubagentTool,
+	createSubagentToolDefinition,
+	type SubagentRun,
+	type SubagentToolDetails,
+	type SubagentToolInput,
+	subagentTool,
+	subagentToolDefinition,
+} from "./subagent.js";
+export {
 	createSymbolsOverviewTool,
 	createSymbolsOverviewToolDefinition,
 	type SymbolsOverviewOperations,
@@ -128,6 +137,7 @@ import {
 	searchCodeTool,
 	searchCodeToolDefinition,
 } from "./search-code.js";
+import { createSubagentTool, createSubagentToolDefinition, subagentTool, subagentToolDefinition } from "./subagent.js";
 import {
 	createSymbolsOverviewTool,
 	createSymbolsOverviewToolDefinition,
@@ -139,7 +149,15 @@ import { createWriteTool, createWriteToolDefinition, writeTool, writeToolDefinit
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
 
-export const codingTools: Tool[] = [readTool, bashTool, editTool, writeTool, searchCodeTool, symbolsOverviewTool];
+export const codingTools: Tool[] = [
+	readTool,
+	bashTool,
+	editTool,
+	writeTool,
+	searchCodeTool,
+	symbolsOverviewTool,
+	subagentTool,
+];
 export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
 
 export const allTools = {
@@ -149,6 +167,7 @@ export const allTools = {
 	write: writeTool,
 	search_code: searchCodeTool,
 	symbols_overview: symbolsOverviewTool,
+	subagent: subagentTool,
 	grep: grepTool,
 	find: findTool,
 	ls: lsTool,
@@ -161,6 +180,7 @@ export const allToolDefinitions = {
 	write: writeToolDefinition,
 	search_code: searchCodeToolDefinition,
 	symbols_overview: symbolsOverviewToolDefinition,
+	subagent: subagentToolDefinition,
 	grep: grepToolDefinition,
 	find: findToolDefinition,
 	ls: lsToolDefinition,
@@ -181,6 +201,7 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createWriteToolDefinition(cwd),
 		createSearchCodeToolDefinition(cwd),
 		createSymbolsOverviewToolDefinition(cwd),
+		createSubagentToolDefinition(cwd),
 	];
 }
 
@@ -201,6 +222,7 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		write: createWriteToolDefinition(cwd),
 		search_code: createSearchCodeToolDefinition(cwd),
 		symbols_overview: createSymbolsOverviewToolDefinition(cwd),
+		subagent: createSubagentToolDefinition(cwd),
 		grep: createGrepToolDefinition(cwd),
 		find: createFindToolDefinition(cwd),
 		ls: createLsToolDefinition(cwd),
@@ -215,6 +237,7 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createWriteTool(cwd),
 		createSearchCodeTool(cwd),
 		createSymbolsOverviewTool(cwd),
+		createSubagentTool(cwd),
 	];
 }
 
@@ -230,6 +253,7 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		write: createWriteTool(cwd),
 		search_code: createSearchCodeTool(cwd),
 		symbols_overview: createSymbolsOverviewTool(cwd),
+		subagent: createSubagentTool(cwd),
 		grep: createGrepTool(cwd),
 		find: createFindTool(cwd),
 		ls: createLsTool(cwd),

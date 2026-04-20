@@ -70,6 +70,7 @@ describe("ExtensionRunner", () => {
 
 	const extensionContextActions: ExtensionContextActions = {
 		getModel: () => undefined,
+		getThinkingLevel: () => "off",
 		isIdle: () => true,
 		getSignal: () => undefined,
 		abort: () => {},
@@ -174,8 +175,8 @@ describe("ExtensionRunner", () => {
 			const keybindings = { ...defaultKeybindings, "app.interrupt": "ctrl+x" as KeyId };
 			const shortcuts = runner.getShortcuts(keybindings);
 
-			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("conflicts with built-in"));
-			expect(shortcuts.has("ctrl+x")).toBe(false);
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("built-in shortcut for"));
+			expect(shortcuts.has("ctrl+x")).toBe(true);
 
 			warnSpy.mockRestore();
 		});

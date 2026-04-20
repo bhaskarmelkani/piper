@@ -774,7 +774,7 @@ describe("Coding Agent Tools", () => {
 	describe("tool defaults", () => {
 		it("should include smart navigation tools in codingTools", () => {
 			const names = codingTools.map((tool) => tool.name);
-			expect(names).toEqual(["read", "bash", "edit", "write", "search_code", "symbols_overview"]);
+			expect(names).toEqual(["read", "bash", "edit", "write", "search_code", "symbols_overview", "subagent"]);
 		});
 	});
 });

@@ -2,7 +2,7 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 
-import type { AgentMessage } from "@mariozechner/pi-agent-core";
+import type { AgentMessage, ThinkingLevel } from "@mariozechner/pi-agent-core";
 import type { ImageContent, Model } from "@mariozechner/pi-ai";
 import type { KeyId } from "@mariozechner/pi-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.js";
@@ -211,6 +211,7 @@ export class ExtensionRunner {
 	private getModel: () => Model<any> | undefined = () => undefined;
 	private isIdleFn: () => boolean = () => true;
 	private getSignalFn: () => AbortSignal | undefined = () => undefined;
+	private getThinkingLevelFn: () => ThinkingLevel = () => "off";
 	private waitForIdleFn: () => Promise<void> = async () => {};
 	private abortFn: () => void = () => {};
 	private hasPendingMessagesFn: () => boolean = () => false;
@@ -267,6 +268,7 @@ export class ExtensionRunner {
 
 		// Context actions (required)
 		this.getModel = contextActions.getModel;
+		this.getThinkingLevelFn = contextActions.getThinkingLevel;
 		this.isIdleFn = contextActions.isIdle;
 		this.getSignalFn = contextActions.getSignal;
 		this.abortFn = contextActions.abort;
@@ -544,6 +546,7 @@ export class ExtensionRunner {
 			get model() {
 				return getModel();
 			},
+			getThinkingLevel: () => this.getThinkingLevelFn(),
 			isIdle: () => this.isIdleFn(),
 			signal: this.getSignalFn(),
 			abort: () => this.abortFn(),

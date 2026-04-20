@@ -8,7 +8,7 @@ import { formatSkillsForPrompt, type Skill } from "./skills.js";
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Tools to include in prompt. Default: [read, bash, edit, write, search_code, symbols_overview] */
+	/** Tools to include in prompt. Default: [read, bash, edit, write, search_code, symbols_overview, subagent] */
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
 	toolSnippets?: Record<string, string>;
@@ -89,7 +89,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 
 	// Build tools list based on selected tools.
 	// A tool appears in Available tools only when the caller provides a one-line snippet.
-	const tools = selectedTools || ["read", "bash", "edit", "write", "search_code", "symbols_overview"];
+	const tools = selectedTools || ["read", "bash", "edit", "write", "search_code", "symbols_overview", "subagent"];
 	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
 	const toolsList =
 		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
@@ -112,6 +112,7 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const hasFind = tools.includes("find");
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
+	const hasSubagent = tools.includes("subagent");
 
 	// File exploration guidelines
 	if (hasSearchCode) {
@@ -122,6 +123,14 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	}
 	if (hasRead && (hasSearchCode || hasSymbolsOverview)) {
 		addGuideline("Use read only on the most relevant files after search_code and symbols_overview");
+	}
+	if (hasSubagent) {
+		addGuideline("Use subagent when code work splits cleanly into bounded side tasks");
+		addGuideline("Use at most 2 read-only sidecars in parallel, then synthesize in the main context");
+		addGuideline(
+			"Use scout for exploration, planner for plan compression, reviewer for inspection, and worker only for tightly scoped execution",
+		);
+		addGuideline("Do not delegate after mutation begins, and never recurse through child sidecars");
 	}
 	if (hasBash && !hasSearchCode && !hasGrep && !hasFind && !hasLs) {
 		addGuideline("Use bash for file operations like ls, rg, find");
