@@ -10,7 +10,7 @@
 
 Piper is a polished terminal coding agent, forked from [pi](https://github.com/badlogic/pi-mono). Adapt piper to your workflows without forking internals. Extend it with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes). Put your extensions, skills, prompt templates, and themes in [Pi Packages](#pi-packages) and share them with others via npm or git.
 
-Piper ships with powerful defaults but skips features like sub agents and plan mode. Instead, you can ask piper to build what you want or install a third party pi package that matches your workflow.
+Piper ships with powerful defaults: high-signal code navigation, built-in divide-and-conquer sub agents, and a polished TUI. Extend further with TypeScript [Extensions](#extensions), [Skills](#skills), [Prompt Templates](#prompt-templates), and [Themes](#themes), or install third-party [pi packages](#pi-packages) for anything else.
 
 Piper runs in four modes: interactive, print or JSON, RPC for process integration, and an SDK for embedding in your own apps.
 
@@ -60,7 +60,7 @@ pi
 /login  # Then select provider
 ```
 
-Then just talk to pi. By default, pi gives the model six tools: `read`, `bash`, `edit`, `write`, `search_code`, and `symbols_overview`. Use `search_code` for keyword, regex, filename, or AST discovery, then `symbols_overview` to route reads before opening large files. `search_code` is structural and text-based search only. It does not add background indexing, semantic retrieval, or a graph engine. Add capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
+Then just talk to pi. By default, pi gives the model seven tools: `read`, `bash`, `edit`, `write`, `search_code`, `symbols_overview`, and `subagent`. Use `search_code` for keyword, regex, filename, or AST discovery. Use `symbols_overview` to route reads before opening large files. Use `subagent` to delegate bounded side work to scout, planner, reviewer, or worker roles. `search_code` is structural and text-based only — no background indexing, semantic retrieval, or graph engine. Add more capabilities via [skills](#skills), [prompt templates](#prompt-templates), [extensions](#extensions), or [pi packages](#pi-packages).
 
 **Platform notes:** [Windows](docs/windows.md) | [Termux (Android)](docs/termux.md) | [tmux](docs/tmux.md) | [Terminal setup](docs/terminal-setup.md) | [Shell aliases](docs/shell-aliases.md)
 
@@ -415,7 +415,7 @@ Piper is aggressively extensible so it doesn't have to dictate your workflow. Fe
 
 **No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support.
 
-**No sub-agents.** Spawn piper instances via tmux, or build your own with [extensions](#extensions), or install a package that does it your way.
+**Built-in sub-agents.** Scout, planner, reviewer, and worker roles run as isolated child sessions. Add custom roles via [extensions](#extensions) or [pi packages](#pi-packages).
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
@@ -486,13 +486,14 @@ cat README.md | pi -p "Summarize this text"
 
 | Option | Description |
 |--------|-------------|
-| `--tools <list>` | Enable specific built-in tools (default: `read,bash,edit,write,search_code,symbols_overview`) |
+| `--tools <list>` | Enable specific built-in tools (default: `read,bash,edit,write,search_code,symbols_overview,subagent`) |
 | `--no-tools` | Disable all built-in tools (extension tools still work) |
 
-Available built-in tools: `read`, `bash`, `edit`, `write`, `search_code`, `symbols_overview`, `grep`, `find`, `ls`
+Available built-in tools: `read`, `bash`, `edit`, `write`, `search_code`, `symbols_overview`, `subagent`, `grep`, `find`, `ls`
 
 - `search_code` searches code by keyword, regex, filename, or AST pattern and returns compact grouped matches. AST mode is structural only and does not provide semantic retrieval, background indexing, or graph analysis.
 - `symbols_overview` summarizes top-level symbols for one file or a folder so you can decide what to open next before using `read`.
+- `subagent` delegates bounded work to built-in roles: `scout` (read-only exploration), `planner` (plan synthesis from scout findings), `reviewer` (read-only inspection), `worker` (tightly scoped execution). Supports single, parallel (max 2), and chain modes. Use `{previous}` in a chain task to inject the prior step's output.
 
 ### Resource Options
 

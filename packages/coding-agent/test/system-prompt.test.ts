@@ -34,6 +34,7 @@ describe("buildSystemPrompt", () => {
 					write: "Create or overwrite files",
 					search_code: "Search code by keyword, regex, filename, or AST pattern",
 					symbols_overview: "Summarize top-level symbols in a file or folder",
+					subagent: "Delegate bounded work to built-in sidecars",
 				},
 				contextFiles: [],
 				skills: [],
@@ -45,6 +46,7 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("- write:");
 			expect(prompt).toContain("- search_code:");
 			expect(prompt).toContain("- symbols_overview:");
+			expect(prompt).toContain("- subagent:");
 		});
 	});
 
@@ -96,9 +98,9 @@ describe("buildSystemPrompt", () => {
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
 		});
 
-		test("prefers search_code and symbols_overview for code navigation", () => {
+		test("prefers search_code, symbols_overview, and subagent for code navigation", () => {
 			const prompt = buildSystemPrompt({
-				selectedTools: ["read", "bash", "search_code", "symbols_overview"],
+				selectedTools: ["read", "bash", "search_code", "symbols_overview", "subagent"],
 				contextFiles: [],
 				skills: [],
 			});
@@ -106,6 +108,7 @@ describe("buildSystemPrompt", () => {
 			expect(prompt).toContain("Use search_code for keyword, regex, filename, or AST discovery before bash");
 			expect(prompt).toContain("Use symbols_overview before opening large files or folders");
 			expect(prompt).toContain("Use read only on the most relevant files after search_code and symbols_overview");
+			expect(prompt).toContain("Use subagent when code work splits cleanly into bounded side tasks");
 		});
 	});
 });

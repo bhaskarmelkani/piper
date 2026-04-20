@@ -355,11 +355,22 @@ function runFd(bin: string, args: string[], signal?: AbortSignal): Promise<strin
 		const rl = createInterface({ input: child.stdout });
 		const out: string[] = [];
 		let err = "";
+		let done = false;
+		const close = () => {
+			rl.close();
+			signal?.removeEventListener("abort", abort);
+		};
+		const settle = (fn: () => void) => {
+			if (done) return;
+			done = true;
+			close();
+			fn();
+		};
 		const abort = () => {
 			if (!child.killed) {
 				child.kill();
 			}
-			reject(new Error("Operation aborted"));
+			settle(() => reject(new Error("Operation aborted")));
 		};
 		signal?.addEventListener("abort", abort, { once: true });
 		rl.on("line", (line) => {
@@ -371,21 +382,20 @@ function runFd(bin: string, args: string[], signal?: AbortSignal): Promise<strin
 			err += chunk.toString();
 		});
 		child.on("error", (e) => {
-			signal?.removeEventListener("abort", abort);
-			reject(e);
+			settle(() => reject(e));
 		});
 		child.on("close", (code) => {
-			signal?.removeEventListener("abort", abort);
-			rl.close();
-			if (signal?.aborted) {
-				reject(new Error("Operation aborted"));
-				return;
-			}
-			if (code !== 0) {
-				reject(new Error(err.trim() || `fd exited with code ${code}`));
-				return;
-			}
-			resolve(out);
+			settle(() => {
+				if (signal?.aborted) {
+					reject(new Error("Operation aborted"));
+					return;
+				}
+				if (code !== 0) {
+					reject(new Error(err.trim() || `fd exited with code ${code}`));
+					return;
+				}
+				resolve(out);
+			});
 		});
 	});
 }
@@ -553,10 +563,9 @@ export function createSearchCodeToolDefinition(
 					const hits = await (ops.runFd ?? runFd)(bin, cmd, signal);
 					rows = hits
 						.map((file) => (path.isAbsolute(file) ? rel(root, file, true) : keyFor(file)))
-						.filter((file) => matches(file, list))
 						.sort((a, b) => a.localeCompare(b))
 						.slice(0, limit);
-					hitLimit = hits.length > rows.length || hits.length >= limit;
+					hitLimit = hits.length >= limit;
 				}
 			}
 
