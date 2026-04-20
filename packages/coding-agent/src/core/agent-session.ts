@@ -795,7 +795,11 @@ export class AgentSession {
 	setActiveToolsByName(toolNames: string[]): void {
 		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
+		const isSubagentChild = parseInt(process.env.PI_SUBAGENT_DEPTH ?? "0", 10) > 0;
 		for (const name of toolNames) {
+			if (isSubagentChild && name === "subagent") {
+				continue;
+			}
 			const tool = this._toolRegistry.get(name);
 			if (tool) {
 				tools.push(tool);
@@ -1029,6 +1033,7 @@ export class AgentSession {
 				await this._checkCompaction(lastAssistant, false);
 			}
 
+			const mutationStarted = this._turnMutationStarted;
 			this._turnMutationStarted = false;
 
 			// Build messages array (scheduler/custom context first, then user message)
@@ -1038,7 +1043,7 @@ export class AgentSession {
 				cwd: this._cwd,
 				prompt: expandedText,
 				activeToolNames: this.getActiveToolNames(),
-				mutationStarted: this._turnMutationStarted,
+				mutationStarted,
 			});
 			if (schedulerPlan) {
 				messages.push({

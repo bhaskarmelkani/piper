@@ -271,19 +271,21 @@ async function runSingleSubagent(params: {
 		let buffer = "";
 		let stderr = "";
 		let settled = false;
+		let cleanup: (() => void) | undefined;
 		const child = spawn(invocation.command, invocation.args, {
 			cwd: params.cwd,
 			stdio: ["ignore", "pipe", "pipe"],
 			shell: false,
 			env: {
 				...process.env,
-				PI_SUBAGENT_DEPTH: "1",
+				PI_SUBAGENT_DEPTH: String((parseInt(process.env.PI_SUBAGENT_DEPTH ?? "0", 10) || 0) + 1),
 			},
 		});
 
 		const finish = (error?: Error) => {
 			if (settled) return;
 			settled = true;
+			cleanup?.();
 			if (error) reject(error);
 			else resolve();
 		};
@@ -386,6 +388,7 @@ async function runSingleSubagent(params: {
 					}
 				}, 1000);
 			};
+			cleanup = () => params.signal?.removeEventListener("abort", abort);
 			if (params.signal.aborted) {
 				abort();
 			} else {
@@ -519,11 +522,8 @@ export function createSubagentToolDefinition(
 				const details: SubagentToolDetails = { mode, runs: results };
 				const failed = results.some((run) => run.status !== "completed");
 				const summary = results
-					.map(
-						(run) =>
-							`[${run.role}] ${run.status}: ${trimPreview(run.output || run.errorMessage || "(no output)")}`,
-					)
-					.join("\n");
+					.map((run) => `[${run.role}] ${run.status}:\n${run.output || run.errorMessage || "(no output)"}`)
+					.join("\n\n---\n\n");
 				return {
 					content: [{ type: "text", text: summary }],
 					details,

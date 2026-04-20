@@ -250,8 +250,8 @@ describe("subagent tool", () => {
 		const text = result.content[0];
 		expect(spawnMock).toHaveBeenCalledTimes(2);
 		expect(text).toMatchObject({ type: "text" });
-		expect((text as { text: string }).text).toContain("[scout] completed: mapped entry points");
-		expect((text as { text: string }).text).toContain("[scout] completed: mapped downstream flow");
+		expect((text as { text: string }).text).toContain("[scout] completed:\nmapped entry points");
+		expect((text as { text: string }).text).toContain("[scout] completed:\nmapped downstream flow");
 	});
 
 	it("supports planner-after-scout chains with previous output injection", async () => {

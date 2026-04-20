@@ -634,6 +634,26 @@ describe("Coding Agent Tools", () => {
 			expect(output).not.toContain("footer.ts");
 		});
 
+		it("should search filenames with glob filter without redundant post-filtering", async () => {
+			const tool = createSearchCodeTool(testDir, {
+				operations: {
+					runFd: async (_bin, _args, _signal) => [join(testDir, "agent-session.ts"), join(testDir, "footer.ts")],
+				},
+			});
+
+			const result = await tool.execute("search-code-filename-glob", {
+				method: "filename",
+				query: "agent",
+				path: testDir,
+				glob: "**/*.ts",
+			});
+
+			const output = getTextOutput(result);
+			// fd already filters by glob — both results must survive (no redundant post-filter)
+			expect(output).toContain("agent-session.ts");
+			expect(output).toContain("footer.ts");
+		});
+
 		it("should support ast search with explicit language", async () => {
 			const testFile = join(testDir, "gamma.ts");
 			writeFileSync(testFile, "console.log(foo)\n");

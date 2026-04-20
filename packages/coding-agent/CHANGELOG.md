@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-04-20
+
+### Added
+
+- Added `search_code` tool for high-signal code discovery via keyword, regex, filename, and AST-based structural search. Supports `glob`, `language`, `context`, and `ignoreCase` filtering. Routes to ripgrep (keyword/regex), fd (filename), and ast-grep (structural).
+- Added `symbols_overview` tool for file and folder symbol summaries. File scope lists top-level symbols with line anchors for TypeScript/JavaScript and generic fallback for other languages. Folder scope scores and summarizes the most relevant files.
+- Added built-in `subagent` tool with single, parallel, and chain execution modes for divide-and-conquer code work. Automatically spawns read-only sidecars (`scout`, `planner`, `reviewer`) with role-aware model selection.
+- Added fixed role system for subagents: `scout` (read-only exploration), `planner` (plan synthesis), `reviewer` (read-only inspection), `worker` (write-capable execution).
+- Added model policy for automatic model downselection: `scout` prefers cheaper/faster siblings, `planner` and `reviewer` prefer mid-tier reasoning models, all with safe fallback to current model.
+- Added delegation scheduler that automatically suggests read-only sidecar hints for code exploration and planning tasks, respecting recursion and mutation guards.
+- Added subagent transcript rendering: compact grouped activity block showing role, status, and model, with expanded view showing task, tool calls, usage, and final output.
+
+### Fixed
+
+- Fixed parallel subagent mode to send untruncated scout output to main LLM for proper synthesis (was limited to 120 chars per scout).
+- Fixed `search_code` filename search to avoid redundant glob filtering that could silently drop valid results when `glob` or `language` options were used.
+- Fixed `search_code` filename search `hitLimit` detection to only report truncation when the user-specified limit was actually reached (not when post-filters removed entries).
+- Fixed `runFd` function to use consistent `settle()` guard pattern with `runRg` and `runAst` for proper abort handling and preventing double-resolution.
+- Fixed subagent recursion guard to properly read `PI_SUBAGENT_DEPTH` env var and exclude `subagent` tool from child sessions.
+- Fixed subagent scheduler mutation guard to correctly observe mutations from previous rounds in the same turn.
+
+### Changed
+
+- Changed default tool surface from `[read, bash, edit, write]` to `[read, bash, edit, write, search_code, symbols_overview, subagent]`.
+- Changed system prompt to prefer `search_code` and `symbols_overview` for code navigation, using `read` only after targeted evidence is gathered.
+
 ## [0.2.0] - 2026-04-19
 
 ### Added
