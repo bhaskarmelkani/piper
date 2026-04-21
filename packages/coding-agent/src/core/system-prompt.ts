@@ -8,6 +8,10 @@ import { formatSkillsForPrompt, type Skill } from "./skills.js";
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
+	/** Enable team mode: plan-first execution, pre-mutation approval, worker-per-milestone. Default: false. */
+	teamMode?: boolean;
+	/** When true, inject a strong directive to stop direct file reads and use a subagent instead. */
+	explorationNudge?: boolean;
 	/** Tools to include in prompt. Default: [read, bash, edit, write, search_code, symbols_overview, subagent] */
 	selectedTools?: string[];
 	/** Optional one-line tool snippets keyed by tool name. */
@@ -30,6 +34,8 @@ export interface BuildSystemPromptOptions {
 export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
 	const {
 		customPrompt,
+		teamMode,
+		explorationNudge,
 		selectedTools,
 		toolSnippets,
 		promptGuidelines,
@@ -89,7 +95,17 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 
 	// Build tools list based on selected tools.
 	// A tool appears in Available tools only when the caller provides a one-line snippet.
-	const tools = selectedTools || ["read", "bash", "edit", "write", "search_code", "symbols_overview", "subagent"];
+	const tools = selectedTools || [
+		"read",
+		"bash",
+		"edit",
+		"write",
+		"search_code",
+		"symbols_overview",
+		"subagent",
+		"confirm",
+		"ask",
+	];
 	const visibleTools = tools.filter((name) => !!toolSnippets?.[name]);
 	const toolsList =
 		visibleTools.length > 0 ? visibleTools.map((name) => `- ${name}: ${toolSnippets![name]}`).join("\n") : "(none)";
@@ -113,6 +129,8 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	const hasLs = tools.includes("ls");
 	const hasRead = tools.includes("read");
 	const hasSubagent = tools.includes("subagent");
+	const hasConfirm = tools.includes("confirm");
+	const hasAsk = tools.includes("ask");
 
 	// File exploration guidelines
 	if (hasSearchCode) {
@@ -122,15 +140,39 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		addGuideline("Use symbols_overview before opening large files or folders");
 	}
 	if (hasRead && (hasSearchCode || hasSymbolsOverview)) {
-		addGuideline("Use read only on the most relevant files after search_code and symbols_overview");
+		addGuideline(
+			"Use read with paths[] to read multiple files in one call; use it only on the most relevant files after search_code and symbols_overview",
+		);
 	}
 	if (hasSubagent) {
 		addGuideline("Use subagent when code work splits cleanly into bounded side tasks");
-		addGuideline("Use at most 2 read-only sidecars in parallel, then synthesize in the main context");
+		addGuideline("Use at most 3 read-only sidecars in parallel, then synthesize in the main context");
 		addGuideline(
 			"Use scout for exploration, planner for plan compression, reviewer for inspection, and worker only for tightly scoped execution",
 		);
 		addGuideline("Do not delegate after mutation begins, and never recurse through child sidecars");
+	}
+	if (hasConfirm) {
+		addGuideline(
+			"Use the confirm tool whenever you need user confirmation or want to ask a yes/no question — never ask in plain text",
+		);
+	}
+	if (hasAsk) {
+		addGuideline(
+			"Use the ask tool to present multiple options or collect free-text input from the user — never ask in plain text",
+		);
+	}
+	const hasWrite = tools.includes("write") || tools.includes("edit");
+	if (teamMode && hasWrite) {
+		addGuideline(
+			"Before touching any files: use the confirm tool to list the files you plan to create or modify and ask the user to proceed — do not call edit or write until confirmed",
+		);
+		addGuideline(
+			"For tasks touching multiple files or requiring multiple steps: write a plan to .plans/<YYYYMMDD-HHmmss>-<slug>.md with milestone steps in [ ] not started / [~] in progress / [x] done / [!] blocked format before editing anything",
+		);
+		addGuideline(
+			"Execute each milestone using a worker subagent — pass the milestone step as the task — so the main context stays clean. Update the plan file after each milestone completes or fails",
+		);
 	}
 	if (hasBash && !hasSearchCode && !hasGrep && !hasFind && !hasLs) {
 		addGuideline("Use bash for file operations like ls, rg, find");
@@ -145,6 +187,12 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		if (normalized.length > 0) {
 			addGuideline(normalized);
 		}
+	}
+
+	if (explorationNudge && hasSubagent) {
+		addGuideline(
+			"STOP: You have made 5+ file reads without using a subagent. Do not read any more files directly. Immediately use a scout subagent to continue exploration and keep this context clean.",
+		);
 	}
 
 	// Always include these

@@ -250,6 +250,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"search_code",
 		"symbols_overview",
 		"subagent",
+		"confirm",
+		"ask",
 	];
 	const initialActiveToolNames: ToolName[] = options.tools
 		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
