@@ -137,7 +137,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		addGuideline("Use search_code for keyword, regex, filename, or AST discovery before bash");
 	}
 	if (hasSymbolsOverview) {
-		addGuideline("Use symbols_overview before opening large files or folders");
+		addGuideline(
+			"For files over ~300 lines, use symbols_overview before paging through with read — one call replaces 3–5 read calls",
+		);
 	}
 	if (hasRead && (hasSearchCode || hasSymbolsOverview)) {
 		addGuideline(
@@ -151,6 +153,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 			"Use scout for exploration, planner for plan compression, reviewer for inspection, and worker only for tightly scoped execution",
 		);
 		addGuideline("Do not delegate after mutation begins, and never recurse through child sidecars");
+		addGuideline(
+			"Use a scout subagent for 'where is X used?' or 'find all call sites of Y' questions instead of issuing repeated search_code calls from the main context",
+		);
 	}
 	if (hasConfirm) {
 		addGuideline(
@@ -198,6 +203,9 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 	// Always include these
 	addGuideline("Be concise in your responses");
 	addGuideline("Show file paths clearly when working with files");
+	addGuideline(
+		"Open multi-file change replies with a one-line verdict (done / failed), then ≤3 decision bullets, then details. Skip the recap when there is nothing new to say",
+	);
 
 	const guidelines = guidelinesList.map((g) => `- ${g}`).join("\n");
 

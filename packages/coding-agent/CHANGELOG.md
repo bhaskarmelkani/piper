@@ -2,7 +2,24 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added `paths: string[]` to `search_code` schema for multi-root searches; all three backends (rg, fd, ast-grep) receive the full path list natively, and results are displayed relative to cwd.
+- Added candidate line numbers to `edit` tool's ambiguous-match error — when `oldText` matches N>1 occurrences, the error now lists the line numbers of each occurrence so the model can disambiguate without re-reading the file.
+
 ### Fixed
+
+- Fixed `search_code` flag injection: queries starting with `--` (e.g. `--models`) no longer get parsed as ripgrep flags — a `--` separator is now inserted before the query in all keyword/regex invocations.
+- Fixed AJV enum error formatter in tool-call validation to use `err.params.allowedValue` when available, ensuring "must be one of: …" messages always include the allowed values.
+- Fixed transcript spacing: turn boundaries (before each user message, compaction summary, and branch summary) now use two blank lines instead of one for better visual breathing room.
+- Routed TPS metrics from the TUI transcript to the sidebar Session Health section via `setSidebarSections`, removing the per-turn stats line from the chat transcript.
+- Shortened tool-call IDs in HTML session exports from provider-generated tokens (~700 chars) to sequential short IDs (`call_0001`, …). Original IDs are preserved in a `debugIds` map for troubleshooting.
+
+### Changed
+
+- Updated `symbols_overview` system-prompt guideline to mention the ~300-line threshold and quantify the read-count savings.
+- Added system-prompt nudge for multi-file change replies to open with a one-line verdict then ≤3 decision bullets.
+- Added system-prompt nudge to use a scout subagent for symbol-lookup questions instead of repeated `search_code` calls.
 
 - Fixed authoritative GitHub Copilot model visibility to hide models omitted from successful `/models` responses while keeping failed policy fetches non-authoritative, and routed the behavior through a provider model-visibility adapter so provider-specific login rules stay isolated.
 

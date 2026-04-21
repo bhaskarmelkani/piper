@@ -3420,14 +3420,14 @@ export class InteractiveMode {
 				break;
 			}
 			case "compactionSummary": {
-				this.chatContainer.addChild(new Spacer(1));
+				this.chatContainer.addChild(new Spacer(2));
 				const component = new CompactionSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
 				this.chatContainer.addChild(component);
 				break;
 			}
 			case "branchSummary": {
-				this.chatContainer.addChild(new Spacer(1));
+				this.chatContainer.addChild(new Spacer(2));
 				const component = new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
 				this.chatContainer.addChild(component);
@@ -3437,7 +3437,7 @@ export class InteractiveMode {
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
 					if (!this.isFirstUserMessage) {
-						this.chatContainer.addChild(new Spacer(1));
+						this.chatContainer.addChild(new Spacer(2));
 					}
 					const skillBlock = parseSkillBlock(textContent);
 					if (skillBlock) {

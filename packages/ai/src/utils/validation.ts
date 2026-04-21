@@ -87,7 +87,7 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 		if (err.keyword === "const") {
 			const path = err.instancePath ? err.instancePath.substring(1) : "root";
 			const allowed = constsByPath.get(path) ?? [];
-			allowed.push(JSON.stringify(err.schema));
+			allowed.push(JSON.stringify(err.params?.allowedValue ?? err.schema));
 			constsByPath.set(path, allowed);
 		}
 	}

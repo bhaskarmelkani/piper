@@ -144,6 +144,20 @@ function countOccurrences(content: string, oldText: string): number {
 	return fuzzyContent.split(fuzzyOldText).length - 1;
 }
 
+function findOccurrenceLineNumbers(content: string, needle: string): number[] {
+	const fuzzyContent = normalizeForFuzzyMatch(content);
+	const fuzzyNeedle = normalizeForFuzzyMatch(needle);
+	const lineNumbers: number[] = [];
+	let pos = 0;
+	while (pos < fuzzyContent.length) {
+		const idx = fuzzyContent.indexOf(fuzzyNeedle, pos);
+		if (idx === -1) break;
+		lineNumbers.push(fuzzyContent.slice(0, idx).split("\n").length);
+		pos = idx + 1;
+	}
+	return lineNumbers;
+}
+
 function getNotFoundError(path: string, editIndex: number, totalEdits: number): Error {
 	if (totalEdits === 1) {
 		return new Error(
@@ -155,14 +169,22 @@ function getNotFoundError(path: string, editIndex: number, totalEdits: number): 
 	);
 }
 
-function getDuplicateError(path: string, editIndex: number, totalEdits: number, occurrences: number): Error {
+function getDuplicateError(
+	path: string,
+	editIndex: number,
+	totalEdits: number,
+	occurrences: number,
+	lineNumbers: number[],
+): Error {
+	const linesStr = lineNumbers.map((l) => `line ${l}`).join(", ");
+	const hint = linesStr ? ` (at ${linesStr})` : "";
 	if (totalEdits === 1) {
 		return new Error(
-			`Found ${occurrences} occurrences of the text in ${path}. The text must be unique. Please provide more context to make it unique.`,
+			`Found ${occurrences} occurrences of the text in ${path}${hint}. The text must be unique. Provide more surrounding context to make it unique.`,
 		);
 	}
 	return new Error(
-		`Found ${occurrences} occurrences of edits[${editIndex}] in ${path}. Each oldText must be unique. Please provide more context to make it unique.`,
+		`Found ${occurrences} occurrences of edits[${editIndex}] in ${path}${hint}. Each oldText must be unique. Provide more surrounding context to make it unique.`,
 	);
 }
 
@@ -221,7 +243,8 @@ export function applyEditsToNormalizedContent(
 
 		const occurrences = countOccurrences(baseContent, edit.oldText);
 		if (occurrences > 1) {
-			throw getDuplicateError(path, i, normalizedEdits.length, occurrences);
+			const lineNumbers = findOccurrenceLineNumbers(baseContent, edit.oldText);
+			throw getDuplicateError(path, i, normalizedEdits.length, occurrences, lineNumbers);
 		}
 
 		matchedEdits.push({
