@@ -83,38 +83,45 @@ function compareCandidates(
 	return `${left.provider}/${left.id}`.localeCompare(`${right.provider}/${right.id}`);
 }
 
+const _scoutModelCache = new Map<string, ResolvedSubagentModel>();
+
 export function resolveSubagentModel(
 	role: BuiltInSubagentRole,
 	currentModel: Model<Api>,
 	currentThinkingLevel: ThinkingLevel,
 	models: Model<Api>[],
+	fastModelId?: string,
 ): ResolvedSubagentModel {
-	if (role === "worker") {
+	// planner, reviewer, and worker all use the main model
+	if (role !== "scout") {
 		return { model: currentModel, thinkingLevel: currentThinkingLevel };
 	}
 
-	const providerModels = models.filter(
-		(model) => model.provider === currentModel.provider && model.input.includes("text"),
-	);
+	// Scout model is stable within a session — cache by provider + fastModelId
+	const cacheKey = `${currentModel.provider}::${fastModelId ?? ""}`;
+	const cached = _scoutModelCache.get(cacheKey);
+	if (cached) return cached;
+
+	// scout: use the configured fast model if available, otherwise pick the cheapest in-provider model
+	const providerModels = models.filter((m) => m.provider === currentModel.provider && m.input.includes("text"));
+
+	let result: ResolvedSubagentModel;
+	if (fastModelId) {
+		const fast = providerModels.find((m) => m.id === fastModelId);
+		if (fast) {
+			result = { model: fast, thinkingLevel: fast.reasoning ? "minimal" : "off" };
+			_scoutModelCache.set(cacheKey, result);
+			return result;
+		}
+	}
+
 	if (providerModels.length === 0) {
-		return {
-			model: currentModel,
-			thinkingLevel: role === "scout" ? "off" : currentThinkingLevel,
-		};
+		return { model: currentModel, thinkingLevel: "off" };
 	}
 
-	const candidates = [...providerModels].sort((left, right) => compareCandidates(role, currentModel, left, right));
+	const candidates = [...providerModels].sort((left, right) => compareCandidates("scout", currentModel, left, right));
 	const model = candidates[0] ?? currentModel;
-
-	if (role === "scout") {
-		return {
-			model,
-			thinkingLevel: model.reasoning ? "minimal" : "off",
-		};
-	}
-
-	return {
-		model,
-		thinkingLevel: model.reasoning ? "medium" : "off",
-	};
+	result = { model, thinkingLevel: model.reasoning ? "minimal" : "off" };
+	_scoutModelCache.set(cacheKey, result);
+	return result;
 }

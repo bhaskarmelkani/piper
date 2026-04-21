@@ -23,8 +23,26 @@ import {
 
 const searchCodeSchema = Type.Object({
 	query: Type.String({ minLength: 1, description: "Search query or AST pattern" }),
-	method: Type.Union([Type.Literal("keyword"), Type.Literal("regex"), Type.Literal("filename"), Type.Literal("ast")]),
+	method: Type.Union(
+		[
+			Type.Literal("keyword", {
+				description: "Search file contents for a literal string (fast, fixed-string ripgrep search)",
+			}),
+			Type.Literal("regex", { description: "Search file contents using a regular expression" }),
+			Type.Literal("filename", { description: "Search for files by name or path pattern (fd)" }),
+			Type.Literal("ast", { description: "Structural code search using AST patterns (ast-grep)" }),
+		],
+		{
+			description:
+				"Search method: keyword=literal text search, regex=pattern search, filename=file name search, ast=structural code search",
+		},
+	),
 	path: Type.Optional(Type.String({ description: "Directory or file to search (default: current directory)" })),
+	paths: Type.Optional(
+		Type.Array(Type.String(), {
+			description: "Multiple directories or files to search (alternative to path for multi-root searches)",
+		}),
+	),
 	glob: Type.Optional(Type.String({ description: "Optional file glob filter, e.g. '*.ts' or '**/*.test.ts'" })),
 	language: Type.Optional(Type.String({ description: "Language hint or filter, e.g. 'typescript' or 'python'" })),
 	limit: Type.Optional(Type.Number({ description: "Maximum number of results to return (default: 20)" })),
@@ -202,13 +220,16 @@ async function blocks(
 }
 
 function formatCall(
-	args: { query?: string; method?: SearchMethod; path?: string; limit?: number } | undefined,
+	args: { query?: string; method?: SearchMethod; path?: string; paths?: string[]; limit?: number } | undefined,
 	theme: typeof import("../../modes/interactive/theme/theme.js").theme,
 ): string {
 	const query = str(args?.query);
 	const method = str(args?.method);
-	const raw = str(args?.path);
-	const file = raw !== null ? shortenPath(raw || ".") : null;
+	const rawPath: string | null =
+		args?.paths && args.paths.length > 0
+			? args.paths[0] + (args.paths.length > 1 ? ` +${args.paths.length - 1}` : "")
+			: str(args?.path);
+	const file = rawPath !== null ? shortenPath(rawPath || ".") : null;
 	const limit = args?.limit;
 	const invalid = invalidArgText(theme);
 	let text =
@@ -502,14 +523,19 @@ export function createSearchCodeToolDefinition(
 		],
 		parameters: searchCodeSchema,
 		async execute(_toolCallId, args: SearchCodeToolInput, signal?: AbortSignal) {
-			const root = resolveToCwd(args.path || ".", cwd);
-			let stat: Stat;
-			try {
-				stat = await ops.stat(root);
-			} catch {
-				throw new Error(`Path not found: ${root}`);
+			// Resolve single or multiple roots; paths[] takes precedence over path
+			const roots = args.paths ? args.paths.map((p) => resolveToCwd(p, cwd)) : [resolveToCwd(args.path || ".", cwd)];
+
+			// Validate all roots exist (ops.stat may return Stat directly or Promise<Stat>)
+			const rootStats = await Promise.all(roots.map((r) => Promise.resolve(ops.stat(r)).catch(() => null)));
+			for (let i = 0; i < roots.length; i++) {
+				if (!rootStats[i]) throw new Error(`Path not found: ${roots[i]}`);
 			}
-			const dir = stat.isDirectory();
+			const stat = rootStats[0]!;
+			// For multi-root display, use cwd so all results are relative to cwd
+			const displayRoot = roots.length === 1 ? roots[0] : cwd;
+			const dir = roots.length === 1 ? stat.isDirectory() : true;
+
 			const limit = Math.max(1, args.limit ?? DEFAULT_LIMIT);
 			const ctx = Math.max(0, args.context ?? 0);
 			const list = globs(args.glob, args.language);
@@ -527,17 +553,19 @@ export function createSearchCodeToolDefinition(
 				for (const glob of list) {
 					cmd.push("--glob", glob);
 				}
-				cmd.push(args.query, root);
+				// "--" prevents flag-like queries (e.g. "--models") from being parsed as rg flags
+				cmd.push("--", args.query, ...roots);
 				const hits = await (ops.runRg ?? runRg)(bin, cmd, limit, signal);
 				hitLimit = hits.length >= limit;
-				rows = await blocks(hits, root, dir, ctx, ops.readFile);
+				rows = await blocks(hits, displayRoot, dir, ctx, ops.readFile);
 			}
 
 			if (args.method === "filename") {
 				const raw = args.query.includes("/") ? args.query : path.basename(args.query);
 				const find = quote(raw);
-				if (stat.isFile()) {
-					const file = rel(path.dirname(root), root, true);
+				if (roots.length === 1 && stat.isFile()) {
+					// Single-file path: skip fd, check directly
+					const file = rel(path.dirname(roots[0]), roots[0], true);
 					const ok =
 						new RegExp(find, args.ignoreCase ? "i" : "").test(file) &&
 						matches(file, list.length > 0 ? list : globs(undefined, args.language));
@@ -559,10 +587,10 @@ export function createSearchCodeToolDefinition(
 					for (const glob of list.length > 0 ? list : globs(undefined, args.language)) {
 						cmd.push("--glob", glob);
 					}
-					cmd.push(`.*${find}.*`, root);
+					cmd.push(`.*${find}.*`, ...roots);
 					const hits = await (ops.runFd ?? runFd)(bin, cmd, signal);
 					rows = hits
-						.map((file) => (path.isAbsolute(file) ? rel(root, file, true) : keyFor(file)))
+						.map((file) => (path.isAbsolute(file) ? rel(displayRoot, file, true) : keyFor(file)))
 						.sort((a, b) => a.localeCompare(b))
 						.slice(0, limit);
 					hitLimit = hits.length >= limit;
@@ -575,18 +603,18 @@ export function createSearchCodeToolDefinition(
 					throw new Error("ast-grep is not available and could not be downloaded");
 				}
 				const lang = args.language ? (LANGS[args.language.toLowerCase()]?.ast ?? args.language) : undefined;
-				const inferred = stat.isFile() ? infer(root) : undefined;
+				const inferred = roots.length === 1 && stat.isFile() ? infer(roots[0]) : undefined;
 				const use = lang ?? inferred;
 				if (!use) {
 					throw new Error(
 						"AST search needs a language for folders or files with unknown extensions. Provide language='typescript' (or similar).",
 					);
 				}
-				const cmd = ["run", "--pattern", args.query, "--lang", use, "--json=stream", root];
+				const cmd = ["run", "--pattern", args.query, "--lang", use, "--json=stream", ...roots];
 				const hits = await (ops.runAst ?? runAst)(bin, cmd, limit, signal);
-				const filtered = hits.filter((item) => matches(rel(root, item.file, dir), list));
+				const filtered = hits.filter((item) => matches(rel(displayRoot, item.file, dir), list));
 				hitLimit = filtered.length >= limit || hits.length > filtered.length;
-				rows = await blocks(filtered.slice(0, limit), root, dir, ctx, ops.readFile);
+				rows = await blocks(filtered.slice(0, limit), displayRoot, dir, ctx, ops.readFile);
 			}
 
 			if (rows.length === 0) {

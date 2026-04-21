@@ -78,13 +78,32 @@ export function validateToolArguments(tool: Tool, toolCall: ToolCall): any {
 		return args;
 	}
 
-	// Format validation errors nicely
+	// Format validation errors nicely.
+	// For union/enum types (Type.Union([Type.Literal(...)])), AJV emits one "must be equal to constant"
+	// error per literal plus one "must match a schema in anyOf" — with no indication of what the valid
+	// values are. Collect the allowed constants by path and collapse them into a readable message.
+	const constsByPath = new Map<string, string[]>();
+	for (const err of validate.errors ?? []) {
+		if (err.keyword === "const") {
+			const path = err.instancePath ? err.instancePath.substring(1) : "root";
+			const allowed = constsByPath.get(path) ?? [];
+			allowed.push(JSON.stringify(err.params?.allowedValue ?? err.schema));
+			constsByPath.set(path, allowed);
+		}
+	}
+
 	const errors =
 		validate.errors
 			?.map((err: any) => {
-				const path = err.instancePath ? err.instancePath.substring(1) : err.params.missingProperty || "root";
+				const path = err.instancePath ? err.instancePath.substring(1) : err.params?.missingProperty || "root";
+				if (err.keyword === "const") return null; // collapsed into the anyOf line below
+				if (err.keyword === "anyOf" && constsByPath.has(path)) {
+					const allowed = constsByPath.get(path)!;
+					return `  - ${path}: must be one of: ${allowed.join(", ")}`;
+				}
 				return `  - ${path}: ${err.message}`;
 			})
+			.filter(Boolean)
 			.join("\n") || "Unknown validation error";
 
 	const errorMessage = `Validation failed for tool "${toolCall.name}":\n${errors}\n\nReceived arguments:\n${JSON.stringify(toolCall.arguments, null, 2)}`;

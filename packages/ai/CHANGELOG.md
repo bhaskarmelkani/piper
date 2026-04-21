@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed AJV enum error formatter in tool validation to use `err.params.allowedValue` when available, so "must be one of: …" messages reliably include the allowed literal values.
+
 ### Added
 
 - Added `multiplier?: number` field to the `Model<TApi>` interface for representing premium request multipliers on subscription-based providers.

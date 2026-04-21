@@ -37,10 +37,15 @@ function hasRequiredTools(activeToolNames: readonly string[]): boolean {
 	return REQUIRED_TOOLS.every((toolName) => activeToolNames.includes(toolName));
 }
 
+const _workspaceCache = new Map<string, boolean>();
 function looksLikeWorkspace(cwd: string): boolean {
-	return [".git", "package.json", "bun.lock", "tsconfig.json", "src", "packages"].some((entry) =>
+	const cached = _workspaceCache.get(cwd);
+	if (cached !== undefined) return cached;
+	const result = [".git", "package.json", "bun.lock", "tsconfig.json", "src", "packages"].some((entry) =>
 		existsSync(join(cwd, entry)),
 	);
+	_workspaceCache.set(cwd, result);
+	return result;
 }
 
 function normalizePrompt(prompt: string): string {
@@ -70,11 +75,9 @@ function buildSingleScoutPlan(prompt: string): SubagentSchedulePlan {
 		tasks: [{ role: "scout", task }],
 		reason: "single_scout",
 		note: [
-			"Automatic delegation hint: this looks like bounded repo exploration.",
-			"Before doing the work yourself, use one read-only scout to map the code quickly and keep the main context clean.",
-			"Suggested subagent call:",
+			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
 			JSON.stringify({ role: "scout", task }, null, 2),
-			"Do not use worker automatically. If mutation begins, stop delegating and continue in the main agent.",
+			"Worker roles must not be used in this call. Mutation comes after exploration is complete.",
 		].join("\n\n"),
 	};
 }
@@ -95,11 +98,9 @@ function buildParallelScoutPlan(prompt: string): SubagentSchedulePlan {
 		tasks,
 		reason: "parallel_scouts",
 		note: [
-			"Automatic delegation hint: this looks like broad repo exploration with a clean read-only split.",
-			"Use at most two scouts in parallel, then synthesize the results in the main agent.",
-			"Suggested subagent call:",
+			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
 			JSON.stringify({ tasks }, null, 2),
-			"If the combined findings are still large, optionally run one planner afterward. Do not auto-spawn worker.",
+			"If the combined findings are still large, run one planner afterward. Worker roles must not be used in this call. Mutation comes after exploration is complete.",
 		].join("\n\n"),
 	};
 }
@@ -120,11 +121,9 @@ function buildScoutPlannerPlan(prompt: string): SubagentSchedulePlan {
 		tasks,
 		reason: "scout_then_planner",
 		note: [
-			"Automatic delegation hint: this task would benefit from read-only exploration followed by compressed planning.",
-			"Use one scout first, then one planner. Keep both sidecars read-only.",
-			"Suggested subagent call:",
+			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
 			JSON.stringify({ chain: tasks }, null, 2),
-			"Do not auto-spawn worker. Once mutation begins, continue in the main agent.",
+			"After the planner returns, write its output as a plan to .plans/<YYYYMMDD-HHmmss>-<slug>.md in [ ]/[~]/[x]/[!] format before editing any files. Worker roles must not be used in this call. Mutation comes after exploration is complete.",
 		].join("\n\n"),
 	};
 }
@@ -136,11 +135,9 @@ function buildReviewerPlan(prompt: string): SubagentSchedulePlan {
 		tasks: [{ role: "reviewer", task }],
 		reason: "single_reviewer",
 		note: [
-			"Automatic delegation hint: this looks like bounded review-style work.",
-			"Use one reviewer sidecar for focused read-only inspection, then synthesize the findings in the main agent.",
-			"Suggested subagent call:",
+			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
 			JSON.stringify({ role: "reviewer", task }, null, 2),
-			"Keep the transcript compact and do not delegate further.",
+			"Worker roles must not be used in this call. Mutation comes after exploration is complete.",
 		].join("\n\n"),
 	};
 }

@@ -266,6 +266,8 @@ export class AgentSession {
 	private _retryPromise: Promise<void> | undefined = undefined;
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _turnMutationStarted = false;
+	private _turnExplorationCount = 0;
+	private _explorationNudgeActive = false;
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -366,9 +368,20 @@ export class AgentSession {
 	 * happens here instead of in wrappers.
 	 */
 	private _installAgentToolHooks(): void {
+		const EXPLORATION_TOOLS = new Set(["read", "search_code", "grep", "symbols_overview", "find", "ls"]);
+		const EXPLORATION_NUDGE_THRESHOLD = 5;
+
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
 			if (toolCall.name === "edit" || toolCall.name === "write") {
 				this._turnMutationStarted = true;
+			}
+			if (EXPLORATION_TOOLS.has(toolCall.name)) {
+				this._turnExplorationCount++;
+				if (this._turnExplorationCount >= EXPLORATION_NUDGE_THRESHOLD && !this._explorationNudgeActive) {
+					this._explorationNudgeActive = true;
+					this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+					this.agent.state.systemPrompt = this._baseSystemPrompt;
+				}
 			}
 			const runner = this._extensionRunner;
 			if (!runner?.hasHandlers("tool_call")) {
@@ -925,6 +938,8 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
+			teamMode: this.settingsManager.getTeamMode(),
+			explorationNudge: this._explorationNudgeActive,
 		});
 	}
 
@@ -1035,6 +1050,12 @@ export class AgentSession {
 
 			const mutationStarted = this._turnMutationStarted;
 			this._turnMutationStarted = false;
+			this._turnExplorationCount = 0;
+			if (this._explorationNudgeActive) {
+				this._explorationNudgeActive = false;
+				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+				this.agent.state.systemPrompt = this._baseSystemPrompt;
+			}
 
 			// Build messages array (scheduler/custom context first, then user message)
 			messages = [];
@@ -1492,7 +1513,7 @@ export class AgentSession {
 	}
 
 	private async _cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
-		const availableModels = await this._modelRegistry.getAvailable();
+		const availableModels = await this._modelRegistry.getAvailableWithVisibilityRefresh();
 		if (availableModels.length <= 1) return undefined;
 
 		const currentModel = this.model;
@@ -2364,6 +2385,7 @@ export class AgentSession {
 			: createAllToolDefinitions(this._cwd, {
 					read: { autoResizeImages },
 					bash: { commandPrefix: shellCommandPrefix },
+					subagent: { fastModelId: this.settingsManager.getFastModel() },
 				});
 
 		this._baseToolDefinitions = new Map(

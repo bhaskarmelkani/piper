@@ -11,11 +11,7 @@ import {
 } from "@mariozechner/pi-tui";
 import type { ModelRegistry } from "../../../core/model-registry.js";
 import type { SettingsManager } from "../../../core/settings-manager.js";
-import {
-	COPILOT_MULTIPLIERS,
-	type CopilotModelPolicy,
-	fetchCopilotModelPolicies,
-} from "../../../utils/copilot-model-policies.js";
+import { COPILOT_MULTIPLIERS, type CopilotModelPolicy } from "../../../utils/copilot-model-policies.js";
 import { theme } from "../theme/theme.js";
 import { DynamicBorder } from "./dynamic-border.js";
 import { keyHint } from "./keybinding-hints.js";
@@ -59,7 +55,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 	private modelRegistry: ModelRegistry;
 	private onSelectCallback: (model: Model<any>) => void;
 	private onCancelCallback: () => void;
-	private copilotPolicies: Map<string, CopilotModelPolicy> = new Map();
+	private copilotPolicies: ReadonlyMap<string, CopilotModelPolicy> | undefined;
 	private errorMessage?: string;
 	private tui: TUI;
 	private scopedModels: ReadonlyArray<ScopedModelItem>;
@@ -142,6 +138,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 	private async loadModels(): Promise<void> {
 		let models: ModelItem[];
+		this.copilotPolicies = undefined;
 
 		// Refresh to pick up any changes to models.json
 		this.modelRegistry.refresh();
@@ -154,7 +151,8 @@ export class ModelSelectorComponent extends Container implements Focusable {
 
 		// Load available models (built-in models still work even if models.json failed)
 		try {
-			const availableModels = await this.modelRegistry.getAvailable();
+			const availableModels = await this.modelRegistry.getAvailableWithVisibilityRefresh();
+			this.copilotPolicies = this.modelRegistry.getModelVisibilityMetadata<CopilotModelPolicy>("github-copilot");
 			models = availableModels.map((model: Model<any>) => ({
 				provider: model.provider,
 				id: model.id,
@@ -169,41 +167,18 @@ export class ModelSelectorComponent extends Container implements Focusable {
 			return;
 		}
 
-		// Fetch Copilot model policies (multiplier + disabled) if Copilot models are available
-		const copilotModel = models.find((m) => m.provider === "github-copilot");
-		if (copilotModel) {
-			const auth = await this.modelRegistry.getApiKeyAndHeaders(copilotModel.model);
-			if (auth.ok && auth.apiKey) {
-				this.copilotPolicies = await fetchCopilotModelPolicies(auth.apiKey, copilotModel.model.baseUrl);
-				if (this.copilotPolicies.size > 0) {
-					models = models.filter((m) => {
-						if (m.provider !== "github-copilot") return true;
-						const policy = this.copilotPolicies.get(m.id);
-						return !policy?.disabled;
-					});
-				}
-			}
-
-			// Filter out Copilot models with no known multiplier — unlisted models are
-			// deprecated or not yet available. x0 is valid (free included models).
-			models = models.filter((m) => {
-				if (m.provider !== "github-copilot") return true;
-				const apiMultiplier = this.copilotPolicies.get(m.id)?.multiplier;
-				const staticMultiplier = COPILOT_MULTIPLIERS[m.id];
-				return apiMultiplier !== undefined || staticMultiplier !== undefined;
-			});
-		}
-
 		this.allModels = this.sortModels(models);
 		this.scopedModels = this.scopedModels.map((scoped) => {
 			const refreshed = this.modelRegistry.find(scoped.model.provider, scoped.model.id);
 			return refreshed ? { ...scoped, model: refreshed } : scoped;
 		});
-		this.scopedModelItems = this.scopedModels.map((scoped) => ({
-			provider: scoped.model.provider,
-			id: scoped.model.id,
-			model: scoped.model,
-		}));
+		this.scopedModelItems = this.scopedModels
+			.map((scoped) => ({
+				provider: scoped.model.provider,
+				id: scoped.model.id,
+				model: scoped.model,
+			}))
+			.filter((model) => this.modelRegistry.isModelVisible(model));
 		this.activeModels = this.scope === "scoped" ? this.scopedModelItems : this.allModels;
 		this.filteredModels = this.activeModels;
 		const currentIndex = this.filteredModels.findIndex((item) => modelsAreEqual(this.currentModel, item.model));
@@ -306,7 +281,7 @@ export class ModelSelectorComponent extends Container implements Focusable {
 				}
 			}
 
-			const copilotPolicy = item.provider === "github-copilot" ? this.copilotPolicies.get(item.id) : undefined;
+			const copilotPolicy = item.provider === "github-copilot" ? this.copilotPolicies?.get(item.id) : undefined;
 			const multiplier =
 				item.provider === "github-copilot"
 					? (copilotPolicy?.multiplier ?? COPILOT_MULTIPLIERS[item.id])

@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { Api, Context, Model, OpenAICompletionsCompat } from "@mariozechner/pi-ai";
 import { getApiProvider } from "@mariozechner/pi-ai";
 import { getOAuthProvider } from "@mariozechner/pi-ai/oauth";
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.js";
 import { clearApiKeyCache, ModelRegistry } from "../src/core/model-registry.js";
 
@@ -24,6 +24,8 @@ describe("ModelRegistry", () => {
 		if (tempDir && existsSync(tempDir)) {
 			rmSync(tempDir, { recursive: true });
 		}
+		vi.restoreAllMocks();
+		vi.unstubAllGlobals();
 		clearApiKeyCache();
 	});
 
@@ -87,6 +89,98 @@ describe("ModelRegistry", () => {
 	const emptyContext: Context = {
 		messages: [],
 	};
+
+	describe("model visibility adapters", () => {
+		test("built-in Copilot adapter hides models omitted from a successful /models response and caches metadata", async () => {
+			authStorage.set("github-copilot", { type: "api_key", key: "TEST_KEY" });
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+
+			vi.spyOn(globalThis, "fetch").mockResolvedValue(
+				new Response(
+					JSON.stringify({
+						data: [{ id: "gpt-4.1", premium_requests_multiplier: 0, is_disabled: false }],
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+			);
+
+			const models = await registry.getAvailableWithVisibilityRefresh();
+			const copilotIds = models.filter((m) => m.provider === "github-copilot").map((m) => m.id);
+
+			expect(copilotIds).toContain("gpt-4.1");
+			expect(copilotIds).not.toContain("gpt-5.2");
+			expect(
+				registry
+					.getAvailable()
+					.filter((m) => m.provider === "github-copilot")
+					.map((m) => m.id),
+			).toEqual(copilotIds);
+			expect(
+				registry.getModelVisibilityMetadata<{ multiplier?: number; disabled: boolean }>("github-copilot"),
+			).toEqual(new Map([["gpt-4.1", { multiplier: 0, disabled: false }]]));
+		});
+
+		test("built-in Copilot adapter remains non-authoritative when the policy fetch fails", async () => {
+			authStorage.set("github-copilot", { type: "api_key", key: "TEST_KEY" });
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+
+			vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
+
+			const models = await registry.getAvailableWithVisibilityRefresh();
+			const copilotIds = models.filter((m) => m.provider === "github-copilot").map((m) => m.id);
+
+			expect(copilotIds).toContain("gpt-4.1");
+			expect(copilotIds).toContain("gpt-5.2");
+			expect(registry.getModelVisibilityMetadata("github-copilot")).toBeUndefined();
+		});
+
+		test("extension providers can register their own model visibility adapter", async () => {
+			const registry = ModelRegistry.inMemory(authStorage);
+			registry.registerProvider("custom-visibility", {
+				baseUrl: "https://visibility.example.test/v1",
+				apiKey: "TEST_KEY",
+				api: "openai-responses",
+				modelVisibilityAdapter: {
+					async refresh({ provider, models }) {
+						expect(provider).toBe("custom-visibility");
+						expect(models.map((model) => model.id)).toEqual(["allowed", "blocked"]);
+						return {
+							visibleModelIds: new Set(["allowed"]),
+							metadata: new Map([["allowed", { tier: "visible" }]]),
+						};
+					},
+				},
+				models: [
+					{
+						id: "allowed",
+						name: "Allowed",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 100000,
+						maxTokens: 8000,
+					},
+					{
+						id: "blocked",
+						name: "Blocked",
+						reasoning: false,
+						input: ["text"],
+						cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+						contextWindow: 100000,
+						maxTokens: 8000,
+					},
+				],
+			});
+
+			const models = await registry.getAvailableWithVisibilityRefresh();
+			const customIds = models.filter((m) => m.provider === "custom-visibility").map((m) => m.id);
+
+			expect(customIds).toEqual(["allowed"]);
+			expect(registry.getModelVisibilityMetadata<{ tier: string }>("custom-visibility")).toEqual(
+				new Map([["allowed", { tier: "visible" }]]),
+			);
+		});
+	});
 
 	describe("baseUrl override (no custom models)", () => {
 		test("overriding baseUrl keeps all built-in models", () => {

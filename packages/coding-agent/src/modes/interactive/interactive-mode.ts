@@ -351,12 +351,14 @@ export class InteractiveMode {
 	private static readonly SCROLL_ANIM_MS = 8;
 	private static readonly SCROLL_LERP = 0.4;
 
-	// Sidebar visibility state (actual display also depends on terminal width)
+	// Whether the sidebar is currently visible. Auto-hidden below SIDEBAR_MIN_TERMINAL_WIDTH regardless.
 	private sidebarVisible = true;
 	private sidebarContributions = new Map<string, SidebarContribution>();
 	private sidebarContributionSequence = 0;
 
 	private static readonly SIDEBAR_WIDTH = 30;
+	// Right padding kept when sidebar is hidden so transcript text doesn't run to the terminal edge.
+	private static readonly SIDEBAR_HIDDEN_PADDING = 2;
 	private static readonly SIDEBAR_MIN_TERMINAL_WIDTH = 100;
 	private static readonly MIN_TRANSCRIPT_HEIGHT = 6;
 	private static readonly MAX_DOCK_HEIGHT_RATIO = 0.4;
@@ -945,6 +947,7 @@ export class InteractiveMode {
 			rawKeyHint("/", "commands"),
 			rawKeyHint("!", "bash"),
 			keyHint("app.tools.expand", "more"),
+			keyHint("app.sidebar.toggle", "sidebar"),
 		].join(theme.fg("muted", " · "));
 		this.dockHintsText.setText(hints);
 	}
@@ -3417,14 +3420,14 @@ export class InteractiveMode {
 				break;
 			}
 			case "compactionSummary": {
-				this.chatContainer.addChild(new Spacer(1));
+				this.chatContainer.addChild(new Spacer(2));
 				const component = new CompactionSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
 				this.chatContainer.addChild(component);
 				break;
 			}
 			case "branchSummary": {
-				this.chatContainer.addChild(new Spacer(1));
+				this.chatContainer.addChild(new Spacer(2));
 				const component = new BranchSummaryMessageComponent(message, this.getMarkdownThemeWithSettings());
 				component.setExpanded(this.toolOutputExpanded);
 				this.chatContainer.addChild(component);
@@ -3434,7 +3437,7 @@ export class InteractiveMode {
 				const textContent = this.getUserMessageText(message);
 				if (textContent) {
 					if (!this.isFirstUserMessage) {
-						this.chatContainer.addChild(new Spacer(1));
+						this.chatContainer.addChild(new Spacer(2));
 					}
 					const skillBlock = parseSkillBlock(textContent);
 					if (skillBlock) {
@@ -3786,6 +3789,10 @@ export class InteractiveMode {
 
 	private toggleSidebar(): void {
 		this.sidebarVisible = !this.sidebarVisible;
+		// When hidden, keep a small right margin so transcript text doesn't reach the terminal edge.
+		this.shellLayout.setRightWidth(
+			this.sidebarVisible ? InteractiveMode.SIDEBAR_WIDTH : InteractiveMode.SIDEBAR_HIDDEN_PADDING,
+		);
 		this.ui.requestRender(true);
 	}
 
@@ -4348,7 +4355,7 @@ export class InteractiveMode {
 
 		this.session.modelRegistry.refresh();
 		try {
-			return await this.session.modelRegistry.getAvailable();
+			return await this.session.modelRegistry.getAvailableWithVisibilityRefresh();
 		} catch {
 			return [];
 		}
@@ -4452,7 +4459,7 @@ export class InteractiveMode {
 	private async showModelsSelector(): Promise<void> {
 		// Get all available models
 		this.session.modelRegistry.refresh();
-		const allModels = this.session.modelRegistry.getAvailable();
+		const allModels = await this.session.modelRegistry.getAvailableWithVisibilityRefresh();
 
 		if (allModels.length === 0) {
 			this.showStatus("No models available");
@@ -4888,7 +4895,7 @@ export class InteractiveMode {
 			let selectedModel: Model<any> | undefined;
 			let selectionError: string | undefined;
 			if (isUnknownModel(previousModel)) {
-				const availableModels = this.session.modelRegistry.getAvailable();
+				const availableModels = await this.session.modelRegistry.getAvailableWithVisibilityRefresh();
 				const providerModels = availableModels.filter((model) => model.provider === providerId);
 				if (!hasDefaultModelProvider(providerId)) {
 					selectionError = `Logged in to ${providerName}, but no default model is configured for provider "${providerId}". Use /model to select a model.`;

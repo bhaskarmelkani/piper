@@ -1,4 +1,11 @@
 export {
+	type AskToolInput,
+	askTool,
+	askToolDefinition,
+	createAskTool,
+	createAskToolDefinition,
+} from "./ask.js";
+export {
 	type BashOperations,
 	type BashSpawnContext,
 	type BashSpawnHook,
@@ -11,6 +18,13 @@ export {
 	createBashToolDefinition,
 	createLocalBashOperations,
 } from "./bash.js";
+export {
+	type ConfirmToolInput,
+	confirmTool,
+	confirmToolDefinition,
+	createConfirmTool,
+	createConfirmToolDefinition,
+} from "./confirm.js";
 export {
 	createEditTool,
 	createEditToolDefinition,
@@ -113,6 +127,7 @@ export {
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.js";
+import { askTool, askToolDefinition, createAskTool, createAskToolDefinition } from "./ask.js";
 import {
 	type BashToolOptions,
 	bashTool,
@@ -120,6 +135,7 @@ import {
 	createBashTool,
 	createBashToolDefinition,
 } from "./bash.js";
+import { confirmTool, confirmToolDefinition, createConfirmTool, createConfirmToolDefinition } from "./confirm.js";
 import { createEditTool, createEditToolDefinition, editTool, editToolDefinition } from "./edit.js";
 import { createFindTool, createFindToolDefinition, findTool, findToolDefinition } from "./find.js";
 import { createGrepTool, createGrepToolDefinition, grepTool, grepToolDefinition } from "./grep.js";
@@ -157,6 +173,8 @@ export const codingTools: Tool[] = [
 	searchCodeTool,
 	symbolsOverviewTool,
 	subagentTool,
+	confirmTool,
+	askTool,
 ];
 export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
 
@@ -168,6 +186,8 @@ export const allTools = {
 	search_code: searchCodeTool,
 	symbols_overview: symbolsOverviewTool,
 	subagent: subagentTool,
+	confirm: confirmTool,
+	ask: askTool,
 	grep: grepTool,
 	find: findTool,
 	ls: lsTool,
@@ -181,6 +201,8 @@ export const allToolDefinitions = {
 	search_code: searchCodeToolDefinition,
 	symbols_overview: symbolsOverviewToolDefinition,
 	subagent: subagentToolDefinition,
+	confirm: confirmToolDefinition,
+	ask: askToolDefinition,
 	grep: grepToolDefinition,
 	find: findToolDefinition,
 	ls: lsToolDefinition,
@@ -191,6 +213,7 @@ export type ToolName = keyof typeof allTools;
 export interface ToolsOptions {
 	read?: ReadToolOptions;
 	bash?: BashToolOptions;
+	subagent?: { fastModelId?: string };
 }
 
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
@@ -201,7 +224,9 @@ export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions)
 		createWriteToolDefinition(cwd),
 		createSearchCodeToolDefinition(cwd),
 		createSymbolsOverviewToolDefinition(cwd),
-		createSubagentToolDefinition(cwd),
+		createSubagentToolDefinition(cwd, options?.subagent),
+		createConfirmToolDefinition(),
+		createAskToolDefinition(),
 	];
 }
 
@@ -222,7 +247,9 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 		write: createWriteToolDefinition(cwd),
 		search_code: createSearchCodeToolDefinition(cwd),
 		symbols_overview: createSymbolsOverviewToolDefinition(cwd),
-		subagent: createSubagentToolDefinition(cwd),
+		subagent: createSubagentToolDefinition(cwd, options?.subagent),
+		confirm: createConfirmToolDefinition(),
+		ask: createAskToolDefinition(),
 		grep: createGrepToolDefinition(cwd),
 		find: createFindToolDefinition(cwd),
 		ls: createLsToolDefinition(cwd),
@@ -238,6 +265,8 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 		createSearchCodeTool(cwd),
 		createSymbolsOverviewTool(cwd),
 		createSubagentTool(cwd),
+		createConfirmTool(),
+		createAskTool(),
 	];
 }
 
@@ -254,6 +283,8 @@ export function createAllTools(cwd: string, options?: ToolsOptions): Record<Tool
 		search_code: createSearchCodeTool(cwd),
 		symbols_overview: createSymbolsOverviewTool(cwd),
 		subagent: createSubagentTool(cwd),
+		confirm: createConfirmTool(),
+		ask: createAskTool(),
 		grep: createGrepTool(cwd),
 		find: createFindTool(cwd),
 		ls: createLsTool(cwd),

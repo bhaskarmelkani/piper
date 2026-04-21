@@ -31,7 +31,7 @@ export async function listModels(modelRegistry: ModelRegistry, searchPattern?: s
 		console.error(chalk.yellow(`Warning: errors loading models.json:\n${loadError}`));
 	}
 
-	const models = modelRegistry.getAvailable();
+	const models = await modelRegistry.getAvailableWithVisibilityRefresh();
 
 	if (models.length === 0) {
 		console.log("No models available. Set API keys in environment variables.");

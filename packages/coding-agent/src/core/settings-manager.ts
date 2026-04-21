@@ -97,6 +97,8 @@ export interface Settings {
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
+	teamMode?: boolean; // default: false — plan-first execution, pre-mutation approval, worker-per-milestone
+	fastModel?: string; // model ID used for scout subagents and meta tasks (e.g. "gpt-5-mini"); defaults to cheapest in-provider model
 }
 
 /** Deep merge settings: project/overrides take precedence, nested objects merge recursively */
@@ -993,5 +995,25 @@ export class SettingsManager {
 
 	getCodeBlockIndent(): string {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
+	}
+
+	getTeamMode(): boolean {
+		return this.settings.teamMode ?? false;
+	}
+
+	setTeamMode(enabled: boolean): void {
+		this.globalSettings.teamMode = enabled;
+		this.markModified("teamMode");
+		this.save();
+	}
+
+	getFastModel(): string | undefined {
+		return this.settings.fastModel;
+	}
+
+	setFastModel(modelId: string | undefined): void {
+		this.globalSettings.fastModel = modelId;
+		this.markModified("fastModel");
+		this.save();
 	}
 }

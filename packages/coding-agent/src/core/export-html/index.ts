@@ -137,6 +137,56 @@ interface SessionData {
 }
 
 /**
+ * Remap long provider-generated tool-call IDs to sequential short IDs (call_0001, ...).
+ * Long IDs (~700 chars for some providers) bloat the export and hurt readability.
+ * Original IDs are preserved in a debugIds map for troubleshooting.
+ */
+function shortenToolCallIds(data: SessionData): object {
+	const idSet = new Set<string>();
+
+	for (const entry of data.entries) {
+		if (entry.type !== "message") continue;
+		const { message: msg } = entry;
+		if (msg.role === "assistant" && Array.isArray(msg.content)) {
+			for (const block of msg.content) {
+				if (block.type === "toolCall" && block.id.length > 20) {
+					idSet.add(block.id);
+				}
+			}
+		}
+		if (msg.role === "toolResult") {
+			const tcId = msg.toolCallId;
+			if (tcId && tcId.length > 20) idSet.add(tcId);
+		}
+	}
+	for (const key of Object.keys(data.renderedTools ?? {})) {
+		if (key.length > 20) idSet.add(key);
+	}
+
+	if (idSet.size === 0) return data;
+
+	let seq = 1;
+	const idMap = new Map<string, string>();
+	for (const id of idSet) {
+		idMap.set(id, `call_${String(seq++).padStart(4, "0")}`);
+	}
+
+	// Remap via JSON string substitution. IDs are long and unique, so surrounding
+	// them in quotes prevents any partial match.
+	let json = JSON.stringify(data);
+	for (const [full, short] of idMap) {
+		json = json.split(`"${full}"`).join(`"${short}"`);
+	}
+
+	const debugIds: Record<string, string> = {};
+	for (const [full, short] of idMap) {
+		debugIds[short] = full;
+	}
+
+	return { ...(JSON.parse(json) as SessionData), debugIds };
+}
+
+/**
  * Core HTML generation logic shared by both export functions.
  */
 function generateHtml(sessionData: SessionData, themeName?: string): string {
@@ -155,8 +205,8 @@ function generateHtml(sessionData: SessionData, themeName?: string): string {
 	const containerBg = themeExport.cardBg ?? derivedExportColors.cardBg;
 	const infoBg = themeExport.infoBg ?? derivedExportColors.infoBg;
 
-	// Base64 encode session data to avoid escaping issues
-	const sessionDataBase64 = Buffer.from(JSON.stringify(sessionData)).toString("base64");
+	// Base64 encode session data (with shortened tool-call IDs) to avoid escaping issues
+	const sessionDataBase64 = Buffer.from(JSON.stringify(shortenToolCallIds(sessionData))).toString("base64");
 
 	// Build the CSS with theme variables injected
 	const css = templateCss

@@ -108,7 +108,7 @@ const ROLE_CONFIGS: Record<BuiltInSubagentRole, RoleConfig> = {
 	},
 };
 
-const MAX_PARALLEL_SUBAGENTS = 2;
+const MAX_PARALLEL_SUBAGENTS = 3;
 const MAX_VISIBLE_PROGRESS = 4;
 
 type PrintJsonEvent =
@@ -441,7 +441,9 @@ async function mapWithConcurrency<T, R>(
 
 export function createSubagentToolDefinition(
 	cwd: string,
+	options?: { fastModelId?: string },
 ): ToolDefinition<typeof subagentSchema, SubagentToolDetails | undefined> {
+	const fastModelId = options?.fastModelId;
 	return {
 		name: "subagent",
 		label: "subagent",
@@ -464,13 +466,13 @@ export function createSubagentToolDefinition(
 			if (!ctx.model) {
 				throw new Error("subagent requires an active model");
 			}
-			const availableModels = ctx.modelRegistry.getAvailable();
+			const availableModels = await ctx.modelRegistry.getAvailableWithVisibilityRefresh();
 			const currentThinkingLevel = ctx.getThinkingLevel();
 			const mode = modeForInput(input);
 
 			if (mode === "single") {
 				const role = input.role as BuiltInSubagentRole;
-				const resolved = resolveSubagentModel(role, ctx.model, currentThinkingLevel, availableModels);
+				const resolved = resolveSubagentModel(role, ctx.model, currentThinkingLevel, availableModels, fastModelId);
 				const run = await runSingleSubagent({
 					role,
 					task: input.task!,
@@ -502,7 +504,13 @@ export function createSubagentToolDefinition(
 				}));
 				const tasks = input.tasks!;
 				const results = await mapWithConcurrency(tasks, MAX_PARALLEL_SUBAGENTS, async (task, index) => {
-					const resolved = resolveSubagentModel(task.role, ctx.model!, currentThinkingLevel, availableModels);
+					const resolved = resolveSubagentModel(
+						task.role,
+						ctx.model!,
+						currentThinkingLevel,
+						availableModels,
+						fastModelId,
+					);
 					const run = await runSingleSubagent({
 						role: task.role,
 						task: task.task,
@@ -534,7 +542,13 @@ export function createSubagentToolDefinition(
 			const chainRuns: SubagentRun[] = [];
 			let previous = "";
 			for (const step of input.chain!) {
-				const resolved = resolveSubagentModel(step.role, ctx.model, currentThinkingLevel, availableModels);
+				const resolved = resolveSubagentModel(
+					step.role,
+					ctx.model,
+					currentThinkingLevel,
+					availableModels,
+					fastModelId,
+				);
 				const run = await runSingleSubagent({
 					role: step.role,
 					task: step.task.replace(/\{previous\}/g, previous),
