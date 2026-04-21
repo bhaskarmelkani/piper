@@ -1,3 +1,5 @@
+import type { ProviderModelVisibilityAdapter } from "../core/model-visibility.js";
+
 const COPILOT_HEADERS = {
 	"User-Agent": "GitHubCopilotChat/0.35.0",
 	"Editor-Version": "vscode/1.107.0",
@@ -44,12 +46,13 @@ export const COPILOT_MULTIPLIERS: Record<string, number> = {
 
 /**
  * Fetches model policies from the Copilot API to get premium multipliers and disabled status.
- * Returns a map of modelId -> policy. Returns empty map on any failure.
+ * Returns a map of modelId -> policy on success, including an empty map when Copilot reports no models.
+ * Returns undefined on any failure so callers can distinguish a failed request from an authoritative empty response.
  */
 export async function fetchCopilotModelPolicies(
 	token: string,
 	baseUrl: string,
-): Promise<Map<string, CopilotModelPolicy>> {
+): Promise<Map<string, CopilotModelPolicy> | undefined> {
 	try {
 		const response = await fetch(`${baseUrl}/models`, {
 			headers: {
@@ -59,13 +62,13 @@ export async function fetchCopilotModelPolicies(
 			},
 			signal: AbortSignal.timeout(2500),
 		});
-		if (!response.ok) return new Map();
+		if (!response.ok) return undefined;
 
 		const raw = (await response.json()) as unknown;
-		if (!raw || typeof raw !== "object") return new Map();
+		if (!raw || typeof raw !== "object") return undefined;
 
 		const data = (raw as Record<string, unknown>).data;
-		if (!Array.isArray(data)) return new Map();
+		if (!Array.isArray(data)) return undefined;
 
 		const result = new Map<string, CopilotModelPolicy>();
 		for (const entry of data) {
@@ -88,6 +91,30 @@ export async function fetchCopilotModelPolicies(
 		}
 		return result;
 	} catch {
-		return new Map();
+		return undefined;
 	}
 }
+
+export const COPILOT_MODEL_VISIBILITY_ADAPTER: ProviderModelVisibilityAdapter<CopilotModelPolicy> = {
+	async refresh({ provider, models, context }) {
+		const copilotModel = models.find((model) => model.provider === provider && context.hasConfiguredAuth(model));
+		if (!copilotModel) {
+			return undefined;
+		}
+
+		const auth = await context.getApiKeyAndHeaders(copilotModel);
+		if (!auth.ok || !auth.apiKey) {
+			return undefined;
+		}
+
+		const policies = await fetchCopilotModelPolicies(auth.apiKey, copilotModel.baseUrl);
+		if (!policies) {
+			return undefined;
+		}
+
+		return {
+			visibleModelIds: new Set([...policies.entries()].filter(([, policy]) => !policy.disabled).map(([id]) => id)),
+			metadata: policies,
+		};
+	},
+};

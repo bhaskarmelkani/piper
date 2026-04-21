@@ -1513,7 +1513,7 @@ export class AgentSession {
 	}
 
 	private async _cycleAvailableModel(direction: "forward" | "backward"): Promise<ModelCycleResult | undefined> {
-		const availableModels = await this._modelRegistry.getAvailable();
+		const availableModels = await this._modelRegistry.getAvailableWithVisibilityRefresh();
 		if (availableModels.length <= 1) return undefined;
 
 		const currentModel = this.model;

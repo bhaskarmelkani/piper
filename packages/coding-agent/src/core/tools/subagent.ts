@@ -466,7 +466,7 @@ export function createSubagentToolDefinition(
 			if (!ctx.model) {
 				throw new Error("subagent requires an active model");
 			}
-			const availableModels = ctx.modelRegistry.getAvailable();
+			const availableModels = await ctx.modelRegistry.getAvailableWithVisibilityRefresh();
 			const currentThinkingLevel = ctx.getThinkingLevel();
 			const mode = modeForInput(input);
 

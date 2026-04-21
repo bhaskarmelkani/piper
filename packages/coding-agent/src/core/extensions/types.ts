@@ -48,6 +48,7 @@ import type { ReadonlyFooterDataProvider } from "../footer-data-provider.js";
 import type { KeybindingsManager } from "../keybindings.js";
 import type { CustomMessage } from "../messages.js";
 import type { ModelRegistry } from "../model-registry.js";
+import type { ProviderModelVisibilityAdapter } from "../model-visibility.js";
 import type {
 	BranchSummaryEntry,
 	CompactionEntry,
@@ -1318,6 +1319,8 @@ export interface ProviderConfig {
 	headers?: Record<string, string>;
 	/** If true, adds Authorization: Bearer header with the resolved API key. */
 	authHeader?: boolean;
+	/** Optional provider-specific model visibility adapter. */
+	modelVisibilityAdapter?: ProviderModelVisibilityAdapter<unknown>;
 	/** Models to register. If provided, replaces all existing models for this provider. */
 	models?: ProviderModelConfig[];
 	/** OAuth provider for /login support. The `id` is set automatically from the provider name. */

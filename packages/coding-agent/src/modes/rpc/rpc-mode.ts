@@ -446,7 +446,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			// =================================================================
 
 			case "set_model": {
-				const models = await session.modelRegistry.getAvailable();
+				const models = await session.modelRegistry.getAvailableWithVisibilityRefresh();
 				const model = models.find((m) => m.provider === command.provider && m.id === command.modelId);
 				if (!model) {
 					return error(id, "set_model", `Model not found: ${command.provider}/${command.modelId}`);
@@ -464,7 +464,7 @@ export async function runRpcMode(runtimeHost: AgentSessionRuntime): Promise<neve
 			}
 
 			case "get_available_models": {
-				const models = await session.modelRegistry.getAvailable();
+				const models = await session.modelRegistry.getAvailableWithVisibilityRefresh();
 				return success(id, "get_available_models", { models });
 			}
 

@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed authoritative GitHub Copilot model visibility to hide models omitted from successful `/models` responses while keeping failed policy fetches non-authoritative, and routed the behavior through a provider model-visibility adapter so provider-specific login rules stay isolated.
+
 ## [0.4.0] - 2026-04-20
 
 ### Added

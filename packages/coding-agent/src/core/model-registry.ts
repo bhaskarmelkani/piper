@@ -23,7 +23,9 @@ import AjvModule from "ajv";
 import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { getAgentDir } from "../config.js";
+import { COPILOT_MODEL_VISIBILITY_ADAPTER } from "../utils/copilot-model-policies.js";
 import type { AuthStorage } from "./auth-storage.js";
+import type { ProviderModelVisibilityAdapter, ProviderModelVisibilityState } from "./model-visibility.js";
 import {
 	clearConfigValueCache,
 	resolveConfigValueOrThrow,
@@ -283,6 +285,10 @@ function applyModelOverride(model: Model<Api>, override: ModelOverride): Model<A
 /** Clear the config value command cache. Exported for testing. */
 export const clearApiKeyCache = clearConfigValueCache;
 
+const BUILT_IN_MODEL_VISIBILITY_ADAPTERS = new Map<string, ProviderModelVisibilityAdapter<unknown>>([
+	["github-copilot", COPILOT_MODEL_VISIBILITY_ADAPTER as ProviderModelVisibilityAdapter<unknown>],
+]);
+
 /**
  * Model registry - loads and manages models, resolves API keys via AuthStorage.
  */
@@ -292,6 +298,10 @@ export class ModelRegistry {
 	private modelRequestHeaders: Map<string, Record<string, string>> = new Map();
 	private registeredProviders: Map<string, ProviderConfigInput> = new Map();
 	private loadError: string | undefined = undefined;
+	private providerModelVisibilityAdapters: Map<string, ProviderModelVisibilityAdapter<unknown>> = new Map(
+		BUILT_IN_MODEL_VISIBILITY_ADAPTERS,
+	);
+	private providerModelVisibilityStates: Map<string, ProviderModelVisibilityState<unknown>> = new Map();
 
 	private constructor(
 		readonly authStorage: AuthStorage,
@@ -315,6 +325,8 @@ export class ModelRegistry {
 		this.providerRequestConfigs.clear();
 		this.modelRequestHeaders.clear();
 		this.loadError = undefined;
+		this.providerModelVisibilityAdapters = new Map(BUILT_IN_MODEL_VISIBILITY_ADAPTERS);
+		this.providerModelVisibilityStates.clear();
 
 		// Ensure dynamic API/OAuth registrations are rebuilt from current provider state.
 		resetApiProviders();
@@ -574,10 +586,58 @@ export class ModelRegistry {
 
 	/**
 	 * Get only models that have auth configured.
-	 * This is a fast check that doesn't refresh OAuth tokens.
+	 * Applies cached provider-specific visibility adapters, if any.
 	 */
 	getAvailable(): Model<Api>[] {
-		return this.models.filter((m) => this.hasConfiguredAuth(m));
+		return this.models.filter((m) => this.hasConfiguredAuth(m)).filter((m) => this.isModelVisible(m));
+	}
+
+	isModelVisible(model: Pick<Model<Api>, "provider" | "id">): boolean {
+		const state = this.providerModelVisibilityStates.get(model.provider);
+		if (!state) {
+			return true;
+		}
+		return state.visibleModelIds.has(model.id);
+	}
+
+	/**
+	 * Refresh provider-specific model visibility adapters, then return available models.
+	 */
+	async getAvailableWithVisibilityRefresh(): Promise<Model<Api>[]> {
+		await this.refreshModelVisibilityAdapters();
+		return this.getAvailable();
+	}
+
+	getModelVisibilityMetadata<TMetadata>(providerName: string): ReadonlyMap<string, TMetadata> | undefined {
+		const metadata = this.providerModelVisibilityStates.get(providerName)?.metadata;
+		return metadata as ReadonlyMap<string, TMetadata> | undefined;
+	}
+
+	async refreshModelVisibilityAdapters(): Promise<void> {
+		this.providerModelVisibilityStates.clear();
+
+		for (const [providerName, adapter] of this.providerModelVisibilityAdapters.entries()) {
+			const providerModels = this.models.filter((model) => model.provider === providerName);
+			if (providerModels.length === 0) {
+				continue;
+			}
+
+			try {
+				const state = await adapter.refresh({
+					provider: providerName,
+					models: providerModels,
+					context: {
+						hasConfiguredAuth: (model) => this.hasConfiguredAuth(model),
+						getApiKeyAndHeaders: (model) => this.getApiKeyAndHeaders(model),
+					},
+				});
+				if (state) {
+					this.providerModelVisibilityStates.set(providerName, state);
+				}
+			} catch {
+				this.providerModelVisibilityStates.delete(providerName);
+			}
+		}
 	}
 
 	/**
@@ -747,6 +807,10 @@ export class ModelRegistry {
 	}
 
 	private applyProviderConfig(providerName: string, config: ProviderConfigInput): void {
+		if (config.modelVisibilityAdapter) {
+			this.providerModelVisibilityAdapters.set(providerName, config.modelVisibilityAdapter);
+		}
+
 		// Register OAuth provider if provided
 		if (config.oauth) {
 			// Ensure the OAuth provider ID matches the provider name
@@ -826,6 +890,8 @@ export interface ProviderConfigInput {
 	streamSimple?: (model: Model<Api>, context: Context, options?: SimpleStreamOptions) => AssistantMessageEventStream;
 	headers?: Record<string, string>;
 	authHeader?: boolean;
+	/** Optional provider-specific model visibility adapter. */
+	modelVisibilityAdapter?: ProviderModelVisibilityAdapter<unknown>;
 	/** OAuth provider for /login support */
 	oauth?: Omit<OAuthProviderInterface, "id">;
 	models?: Array<{

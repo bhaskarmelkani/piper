@@ -4355,7 +4355,7 @@ export class InteractiveMode {
 
 		this.session.modelRegistry.refresh();
 		try {
-			return await this.session.modelRegistry.getAvailable();
+			return await this.session.modelRegistry.getAvailableWithVisibilityRefresh();
 		} catch {
 			return [];
 		}
@@ -4459,7 +4459,7 @@ export class InteractiveMode {
 	private async showModelsSelector(): Promise<void> {
 		// Get all available models
 		this.session.modelRegistry.refresh();
-		const allModels = this.session.modelRegistry.getAvailable();
+		const allModels = await this.session.modelRegistry.getAvailableWithVisibilityRefresh();
 
 		if (allModels.length === 0) {
 			this.showStatus("No models available");
@@ -4895,7 +4895,7 @@ export class InteractiveMode {
 			let selectedModel: Model<any> | undefined;
 			let selectionError: string | undefined;
 			if (isUnknownModel(previousModel)) {
-				const availableModels = this.session.modelRegistry.getAvailable();
+				const availableModels = await this.session.modelRegistry.getAvailableWithVisibilityRefresh();
 				const providerModels = availableModels.filter((model) => model.provider === providerId);
 				if (!hasDefaultModelProvider(providerId)) {
 					selectionError = `Logged in to ${providerName}, but no default model is configured for provider "${providerId}". Use /model to select a model.`;
