@@ -76,8 +76,8 @@
 
         // Create nodes
         for (const entry of entries) {
-          nodeMap.set(entry.id, { 
-            entry, 
+          nodeMap.set(entry.id, {
+            entry,
             children: [],
             label: labelMap.get(entry.id)
           });
@@ -200,7 +200,7 @@
         const stack = [];
 
         // Add roots (prioritize branch containing active leaf)
-        const orderedRoots = [...roots].sort((a, b) => 
+        const orderedRoots = [...roots].sort((a, b) =>
           Number(containsActive.get(b)) - Number(containsActive.get(a))
         );
         for (let i = orderedRoots.length - 1; i >= 0; i--) {
@@ -217,7 +217,7 @@
           const multipleChildren = children.length > 1;
 
           // Order children (active branch first)
-          const orderedChildren = [...children].sort((a, b) => 
+          const orderedChildren = [...children].sort((a, b) =>
             Number(containsActive.get(b)) - Number(containsActive.get(a))
           );
 
@@ -880,8 +880,8 @@
         const renderResultImages = () => {
           const images = getResultImages();
           if (images.length === 0) return '';
-          return '<div class="tool-images">' + 
-            images.map(img => `<img src="data:${img.mimeType};base64,${img.data}" class="tool-image" />`).join('') + 
+          return '<div class="tool-images">' +
+            images.map(img => `<img src="data:${escapeHtml(img.mimeType || 'image/png')};base64,${img.data}" class="tool-image" />`).join('') +
             '</div>';
         };
 
@@ -964,6 +964,22 @@
             }
             break;
           }
+          case 'ls': {
+            const dirPath = str(args.path);
+            const limit = args.limit;
+
+            let pathHtml = dirPath === null ? invalidArg : escapeHtml(shortenPath(dirPath || '.'));
+            if (limit !== undefined) {
+              pathHtml += ` <span class="line-count">(limit ${escapeHtml(String(limit))})</span>`;
+            }
+
+            html += `<div class="tool-header"><span class="tool-name">ls</span> <span class="tool-path">${pathHtml}</span></div>`;
+            if (result) {
+              const output = getResultText().trim();
+              if (output) html += formatExpandableOutput(output, 20);
+            }
+            break;
+          }
           default: {
             // Check for pre-rendered custom tool HTML
             const rendered = renderedTools?.[call.id];
@@ -974,7 +990,7 @@
               } else {
                 html += `<div class="tool-header"><span class="tool-name">${escapeHtml(name)}</span></div>`;
               }
-              
+
               if (rendered.resultHtmlCollapsed && rendered.resultHtmlExpanded && rendered.resultHtmlCollapsed !== rendered.resultHtmlExpanded) {
                 // Both collapsed and expanded differ - render expandable section
                 html += `<div class="tool-output expandable ansi-rendered" onclick="if(window.getSelection().toString())return;this.classList.toggle('expanded')">
@@ -1040,21 +1056,21 @@
         // Check for injected base URL (used when loaded in iframe via srcdoc)
         const baseUrlMeta = document.querySelector('meta[name="pi-share-base-url"]');
         const baseUrl = baseUrlMeta ? baseUrlMeta.content : window.location.href.split('?')[0];
-        
+
         const url = new URL(window.location.href);
         // Find the gist ID (first query param without value, e.g., ?abc123)
         const gistId = Array.from(url.searchParams.keys()).find(k => !url.searchParams.get(k));
-        
+
         // Build the share URL
         const params = new URLSearchParams();
         params.set('leafId', currentLeafId);
         params.set('targetId', entryId);
-        
+
         // If we have an injected base URL (iframe context), use it directly
         if (baseUrlMeta) {
           return `${baseUrl}&${params.toString()}`;
         }
-        
+
         // Otherwise build from current location (direct file access)
         url.search = gistId ? `?${gistId}&${params.toString()}` : `?${params.toString()}`;
         return url.toString();
@@ -1074,7 +1090,7 @@
         } catch (err) {
           // Clipboard API failed, try fallback
         }
-        
+
         // Fallback for HTTP or when Clipboard API is unavailable
         if (!success) {
           try {
@@ -1090,7 +1106,7 @@
             console.error('Failed to copy:', err);
           }
         }
-        
+
         if (success && button) {
           const originalHtml = button.innerHTML;
           button.innerHTML = '✓';
@@ -1132,13 +1148,13 @@
               if (images.length > 0) {
                 html += '<div class="message-images">';
                 for (const img of images) {
-                  html += `<img src="data:${img.mimeType};base64,${img.data}" class="message-image" />`;
+                  html += `<img src="data:${escapeHtml(img.mimeType || 'image/png')};base64,${img.data}" class="message-image" />`;
                 }
                 html += '</div>';
               }
             }
 
-            const text = typeof content === 'string' ? content : 
+            const text = typeof content === 'string' ? content :
               content.filter(c => c.type === 'text').map(c => c.text).join('\n');
             if (text.trim()) {
               html += `<div class="markdown-content">${safeMarkedParse(text)}</div>`;
@@ -1291,8 +1307,12 @@
           <div class="header">
             <h1>Session: ${escapeHtml(header?.id || 'unknown')}</h1>
             <div class="help-bar">
-              <span>Ctrl+T toggle thinking · Ctrl+O toggle tools</span>
-              <button class="download-json-btn" onclick="downloadSessionJson()" title="Download session as JSONL">↓ JSONL</button>
+              <span class="help-hint">T toggle thinking · O toggle tools</span>
+              <div class="help-actions">
+                <button type="button" class="header-toggle-btn" data-action="toggle-thinking" title="Toggle thinking (T)">Toggle thinking</button>
+                <button type="button" class="header-toggle-btn" data-action="toggle-tools" title="Toggle tools (O)">Toggle tools</button>
+                <button type="button" class="download-json-btn" onclick="downloadSessionJson()" title="Download session as JSONL">↓ JSONL</button>
+              </div>
             </div>
             <div class="header-info">
               <div class="info-item"><span class="info-label">Date:</span><span class="info-value">${header?.timestamp ? new Date(header.timestamp).toLocaleString() : 'unknown'}</span></div>
@@ -1393,6 +1413,7 @@
         renderTree();
 
         document.getElementById('header-container').innerHTML = renderHeader();
+        attachHeaderHandlers();
 
         // Build messages using cached DOM nodes
         const messagesEl = document.getElementById('messages');
@@ -1443,18 +1464,21 @@
       // INITIALIZATION
       // ============================================================
 
-      // Escape HTML tags in text (but not code blocks)
-      function escapeHtmlTags(text) {
-        return text.replace(/<(?=[a-zA-Z\/])/g, '&lt;');
-      }
-
-      // Configure marked with syntax highlighting and HTML escaping for text
+      // Configure marked with syntax highlighting and TUI-compatible HTML handling
       const strictStrikethroughRegex = /^(~~)(?=[^\s~])((?:\\.|[^\\])*?(?:\\.|[^\s~\\]))\1(?=[^~]|$)/;
 
       marked.use({
         breaks: true,
         gfm: true,
         tokenizer: {
+          // Treat HTML-like input as plain text so tags are shown verbatim,
+          // matching the TUI markdown renderer.
+          html() {
+            return undefined;
+          },
+          tag() {
+            return undefined;
+          },
           del(src) {
             const match = strictStrikethroughRegex.exec(src);
             if (!match) return undefined;
@@ -1467,6 +1491,32 @@
           }
         },
         renderer: {
+          // Sanitize link URLs to prevent javascript:/vbscript:/data: XSS
+          link(token) {
+            const href = (token.href || '').trim();
+            if (/^\s*(javascript|vbscript|data):/i.test(href)) {
+              return this.parser.parseInline(token.tokens);
+            }
+            let out = '<a href="' + escapeHtml(href) + '"';
+            if (token.title) {
+              out += ' title="' + escapeHtml(token.title) + '"';
+            }
+            out += '>' + this.parser.parseInline(token.tokens) + '</a>';
+            return out;
+          },
+          // Sanitize image src URLs
+          image(token) {
+            const href = (token.href || '').trim();
+            if (/^\s*(javascript|vbscript|data):/i.test(href)) {
+              return escapeHtml(token.text || '');
+            }
+            let out = '<img src="' + escapeHtml(href) + '" alt="' + escapeHtml(token.text || '') + '"';
+            if (token.title) {
+              out += ' title="' + escapeHtml(token.title) + '"';
+            }
+            out += '>';
+            return out;
+          },
           // Code blocks: syntax highlight, no HTML escaping
           code(token) {
             const code = token.text;
@@ -1487,10 +1537,6 @@
               }
             }
             return `<pre><code class="hljs">${highlighted}</code></pre>`;
-          },
-          // Text content: escape HTML tags
-          text(token) {
-            return escapeHtmlTags(escapeHtml(token.text));
           },
           // Inline code: escape HTML
           codespan(token) {
@@ -1672,6 +1718,20 @@
         });
       };
 
+      const attachHeaderHandlers = () => {
+        document.querySelector('[data-action="toggle-thinking"]')?.addEventListener('click', toggleThinking);
+        document.querySelector('[data-action="toggle-tools"]')?.addEventListener('click', toggleToolOutputs);
+      };
+
+      const isEditableTarget = (element) => {
+        if (!element) return false;
+        const tagName = element.tagName;
+        if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT' || tagName === 'BUTTON') {
+          return true;
+        }
+        return element.isContentEditable || Boolean(element.closest?.('[contenteditable="true"]'));
+      };
+
       // Keyboard shortcuts
       document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') {
@@ -1679,11 +1739,16 @@
           searchQuery = '';
           navigateTo(leafId, 'bottom');
         }
-        if (e.ctrlKey && e.key === 't') {
+
+        if (isEditableTarget(document.activeElement)) {
+          return;
+        }
+
+        const key = e.key.toLowerCase();
+        if (key === 't') {
           e.preventDefault();
           toggleThinking();
-        }
-        if (e.ctrlKey && e.key === 'o') {
+        } else if (key === 'o') {
           e.preventDefault();
           toggleToolOutputs();
         }

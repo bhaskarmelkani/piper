@@ -13,6 +13,7 @@ import type { ResourceLoader } from "./resource-loader.js";
 import { DefaultResourceLoader } from "./resource-loader.js";
 import { getDefaultSessionDir, SessionManager } from "./session-manager.js";
 import { SettingsManager } from "./settings-manager.js";
+import { isInstallTelemetryEnabled } from "./telemetry.js";
 import { time } from "./timings.js";
 import {
 	allTools,
@@ -26,6 +27,8 @@ import {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createSearchCodeTool,
+	createSymbolsOverviewTool,
 	createWriteTool,
 	editTool,
 	findTool,
@@ -33,7 +36,6 @@ import {
 	lsTool,
 	readOnlyTools,
 	readTool,
-	type Tool,
 	type ToolName,
 	withFileMutationQueue,
 	writeTool,
@@ -57,8 +59,15 @@ export interface CreateAgentSessionOptions {
 	/** Models available for cycling (Ctrl+P in interactive mode) */
 	scopedModels?: Array<{ model: Model<any>; thinkingLevel?: ThinkingLevel }>;
 
-	/** Built-in tools to use. Default: codingTools [read, bash, edit, write, search_code, symbols_overview, subagent] */
-	tools?: Tool[];
+	/**
+	 * Optional allowlist of tool names.
+	 *
+	 * When omitted, piper enables the default built-in tools
+	 * (read, bash, edit, write, search_code, symbols_overview, subagent)
+	 * and leaves extension/custom tools enabled.
+	 * When provided, only the listed tool names are enabled.
+	 */
+	tools?: string[];
 	/** Custom tools to register (in addition to built-in tools). */
 	customTools?: ToolDefinition[];
 
@@ -113,6 +122,8 @@ export {
 	createLsTool,
 	createReadOnlyTools,
 	createReadTool,
+	createSearchCodeTool,
+	createSymbolsOverviewTool,
 	createWriteTool,
 	editTool,
 	findTool,
@@ -121,14 +132,31 @@ export {
 	readOnlyTools,
 	// Pre-built tools (use process.cwd())
 	readTool,
-	withFileMutationQueue,
 	writeTool,
+	withFileMutationQueue,
 };
 
 // Helper Functions
 
 function getDefaultAgentDir(): string {
 	return getAgentDir();
+}
+
+function getOpenRouterAttributionHeaders(
+	model: Model<any>,
+	settingsManager: SettingsManager,
+): Record<string, string> | undefined {
+	if (!isInstallTelemetryEnabled(settingsManager)) {
+		return undefined;
+	}
+	if (model.provider !== "openrouter" && !model.baseUrl.includes("openrouter.ai")) {
+		return undefined;
+	}
+	return {
+		"HTTP-Referer": "https://pi.dev",
+		"X-OpenRouter-Title": "pi",
+		"X-OpenRouter-Categories": "cli-agent",
+	};
 }
 
 /**
@@ -160,14 +188,14 @@ function getDefaultAgentDir(): string {
  * await loader.reload();
  * const { session } = await createAgentSession({
  *   model: myModel,
- *   tools: [readTool, bashTool],
+ *   tools: ["read", "bash"],
  *   resourceLoader: loader,
  *   sessionManager: SessionManager.inMemory(),
  * });
  * ```
  */
 export async function createAgentSession(options: CreateAgentSessionOptions = {}): Promise<CreateAgentSessionResult> {
-	const cwd = options.cwd ?? process.cwd();
+	const cwd = options.cwd ?? options.sessionManager?.getCwd() ?? process.cwd();
 	const agentDir = options.agentDir ?? getDefaultAgentDir();
 	let resourceLoader = options.resourceLoader;
 
@@ -250,12 +278,8 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		"search_code",
 		"symbols_overview",
 		"subagent",
-		"confirm",
-		"ask",
 	];
-	const initialActiveToolNames: ToolName[] = options.tools
-		? options.tools.map((t) => t.name).filter((n): n is ToolName => n in allTools)
-		: defaultActiveToolNames;
+	const initialActiveToolNames: string[] = options.tools ? [...options.tools] : defaultActiveToolNames;
 
 	let agent: Agent;
 
@@ -311,10 +335,14 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 			if (!auth.ok) {
 				throw new Error(auth.error);
 			}
+			const openRouterAttributionHeaders = getOpenRouterAttributionHeaders(model, settingsManager);
 			return streamSimple(model, context, {
 				...options,
 				apiKey: auth.apiKey,
-				headers: auth.headers || options?.headers ? { ...auth.headers, ...options?.headers } : undefined,
+				headers:
+					openRouterAttributionHeaders || auth.headers || options?.headers
+						? { ...openRouterAttributionHeaders, ...auth.headers, ...options?.headers }
+						: undefined,
 			});
 		},
 		onPayload: async (payload, _model) => {
@@ -372,6 +400,7 @@ export async function createAgentSession(options: CreateAgentSessionOptions = {}
 		customTools: options.customTools,
 		modelRegistry,
 		initialActiveToolNames,
+		allowedToolNames: options.tools,
 		extensionRunnerRef,
 		sessionStartEvent: options.sessionStartEvent,
 	});

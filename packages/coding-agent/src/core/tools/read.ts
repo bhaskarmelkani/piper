@@ -1,9 +1,9 @@
 import type { AgentTool } from "@mariozechner/pi-agent-core";
-import type { ImageContent, TextContent } from "@mariozechner/pi-ai";
+import type { Api, ImageContent, Model, TextContent } from "@mariozechner/pi-ai";
 import { Text } from "@mariozechner/pi-tui";
-import { type Static, Type } from "@sinclair/typebox";
 import { constants } from "fs";
 import { access as fsAccess, readFile as fsReadFile, stat as fsStat } from "fs/promises";
+import { type Static, Type } from "typebox";
 import { keyHint } from "../../modes/interactive/components/keybinding-hints.js";
 import { getLanguageFromPath, highlightCode } from "../../modes/interactive/theme/theme.js";
 import { formatDimensionNote, resizeImage } from "../../utils/image-resize.js";
@@ -37,16 +37,9 @@ export interface ReadToolDetails {
 	truncation?: TruncationResult;
 }
 
-/**
- * Pluggable operations for the read tool.
- * Override these to delegate file reading to remote systems (for example SSH).
- */
 export interface ReadOperations {
-	/** Read file contents as a Buffer */
 	readFile: (absolutePath: string) => Promise<Buffer>;
-	/** Check if file is readable (throw if not) */
 	access: (absolutePath: string) => Promise<void>;
-	/** Detect image MIME type, return null or undefined for non-images */
 	detectImageMimeType?: (absolutePath: string) => Promise<string | null | undefined>;
 }
 
@@ -57,9 +50,7 @@ const defaultReadOperations: ReadOperations = {
 };
 
 export interface ReadToolOptions {
-	/** Whether to auto-resize images to 2000x2000 max. Default: true */
 	autoResizeImages?: boolean;
-	/** Custom operations for file reading. Default: local filesystem */
 	operations?: ReadOperations;
 }
 
@@ -87,6 +78,13 @@ function trimTrailingEmptyLines(lines: string[]): string[] {
 		end--;
 	}
 	return lines.slice(0, end);
+}
+
+function getNonVisionImageNote(model: Model<Api> | undefined): string | undefined {
+	if (!model || model.input.includes("image")) {
+		return undefined;
+	}
+	return "[Current model does not support images. The image will be omitted from this request.]";
 }
 
 function formatReadResult(
@@ -139,7 +137,7 @@ export function createReadToolDefinition(
 			{ path, paths, offset, limit }: { path?: string; paths?: string[]; offset?: number; limit?: number },
 			signal?: AbortSignal,
 			_onUpdate?,
-			_ctx?,
+			ctx?,
 		) {
 			const filePaths = paths && paths.length > 0 ? paths : path ? [path] : [];
 			if (filePaths.length === 0) {
@@ -159,6 +157,7 @@ export function createReadToolDefinition(
 							reject(new Error("Operation aborted"));
 							return;
 						}
+
 						let aborted = false;
 						const onAbort = () => {
 							aborted = true;
@@ -168,75 +167,75 @@ export function createReadToolDefinition(
 
 						(async () => {
 							try {
-								// Check if file exists and is readable.
 								await ops.access(absolutePath);
 								if (aborted) return;
-								// Detect directories early and return a useful message instead of EISDIR.
-								const statResult = await fsStat(absolutePath).catch(() => null);
-								if (statResult?.isDirectory()) {
-									resolve({
-										content: [
-											{
-												type: "text",
-												text: `${absolutePath} is a directory, not a file. Use Glob to find files or Bash (ls) to list contents.`,
-											},
-										],
-										details: undefined,
-									});
-									return;
-								}
+
+								let content: (TextContent | ImageContent)[];
+								let details: ReadToolDetails | undefined;
 								const mimeType = ops.detectImageMimeType
 									? await ops.detectImageMimeType(absolutePath)
 									: undefined;
-								let content: (TextContent | ImageContent)[];
-								let details: ReadToolDetails | undefined;
+								const nonVisionImageNote = getNonVisionImageNote(ctx?.model);
+
 								if (mimeType) {
-									// Read image as binary.
 									const buffer = await ops.readFile(absolutePath);
 									const base64 = buffer.toString("base64");
 									if (autoResizeImages) {
-										// Resize image if needed before sending it back to the model.
 										const resized = await resizeImage({ type: "image", data: base64, mimeType });
 										if (!resized) {
-											content = [
-												{
-													type: "text",
-													text: `Read image file [${mimeType}]\n[Image omitted: could not be resized below the inline image size limit.]`,
-												},
-											];
+											let textNote =
+												`Read image file [${mimeType}]\n` +
+												"[Image omitted: could not be resized below the inline image size limit.]";
+											if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
+											content = [{ type: "text", text: textNote }];
 										} else {
 											const dimensionNote = formatDimensionNote(resized);
 											let textNote = `Read image file [${resized.mimeType}]`;
 											if (dimensionNote) textNote += `\n${dimensionNote}`;
+											if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
 											content = [
 												{ type: "text", text: textNote },
 												{ type: "image", data: resized.data, mimeType: resized.mimeType },
 											];
 										}
 									} else {
+										let textNote = `Read image file [${mimeType}]`;
+										if (nonVisionImageNote) textNote += `\n${nonVisionImageNote}`;
 										content = [
-											{ type: "text", text: `Read image file [${mimeType}]` },
+											{ type: "text", text: textNote },
 											{ type: "image", data: base64, mimeType },
 										];
 									}
 								} else {
-									// Read text content.
+									const statResult = await fsStat(absolutePath).catch(() => null);
+									if (statResult?.isDirectory()) {
+										resolve({
+											content: [
+												{
+													type: "text",
+													text: `${absolutePath} is a directory, not a file. Use Glob to find files or Bash (ls) to list contents.`,
+												},
+											],
+											details: undefined,
+										});
+										return;
+									}
+
 									const buffer = await ops.readFile(absolutePath);
 									const textContent = buffer.toString("utf-8");
 									const allLines = textContent.split("\n");
 									const totalFileLines = allLines.length;
-									// Apply offset if specified. Convert from 1-indexed input to 0-indexed array access.
 									const startLine = offset ? Math.max(0, offset - 1) : 0;
 									const startLineDisplay = startLine + 1;
-									// Check if offset is out of bounds.
+
 									if (startLine >= allLines.length) {
 										throw new Error(
 											`Offset ${offset} is beyond end of file (${allLines.length} lines total)`,
 										);
 									}
+
 									let selectedContent: string;
 									let userLimitedLines: number | undefined;
-									// If limit is specified by the user, honor it first. Otherwise truncateHead decides.
 									if (limit !== undefined) {
 										const endLine = Math.min(startLine + limit, allLines.length);
 										selectedContent = allLines.slice(startLine, endLine).join("\n");
@@ -244,16 +243,14 @@ export function createReadToolDefinition(
 									} else {
 										selectedContent = allLines.slice(startLine).join("\n");
 									}
-									// Apply truncation, respecting both line and byte limits.
+
 									const truncation = truncateHead(selectedContent);
 									let outputText: string;
 									if (truncation.firstLineExceedsLimit) {
-										// First line alone exceeds the byte limit. Point the model at a bash fallback.
 										const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine], "utf-8"));
 										outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use bash: sed -n '${startLineDisplay}p' ${filePath} | head -c ${DEFAULT_MAX_BYTES}]`;
 										details = { truncation };
 									} else if (truncation.truncated) {
-										// Truncation occurred. Build an actionable continuation notice.
 										const endLineDisplay = startLineDisplay + truncation.outputLines - 1;
 										const nextOffset = endLineDisplay + 1;
 										outputText = truncation.content;
@@ -267,14 +264,13 @@ export function createReadToolDefinition(
 										userLimitedLines !== undefined &&
 										startLine + userLimitedLines < allLines.length
 									) {
-										// User-specified limit stopped early, but the file still has more content.
 										const remaining = allLines.length - (startLine + userLimitedLines);
 										const nextOffset = startLine + userLimitedLines + 1;
 										outputText = `${truncation.content}\n\n[${remaining} more lines in file. Use offset=${nextOffset} to continue.]`;
 									} else {
-										// No truncation and no remaining user-limited content.
 										outputText = truncation.content;
 									}
+
 									content = [{ type: "text", text: outputText }];
 								}
 
@@ -294,7 +290,6 @@ export function createReadToolDefinition(
 				return readSingleFile(filePaths[0]!);
 			}
 
-			// Multi-file read: read sequentially and combine with separators
 			const parts: (TextContent | ImageContent)[] = [];
 			for (const filePath of filePaths) {
 				if (signal?.aborted) {
@@ -322,7 +317,3 @@ export function createReadToolDefinition(
 export function createReadTool(cwd: string, options?: ReadToolOptions): AgentTool<typeof readSchema> {
 	return wrapToolDefinition(createReadToolDefinition(cwd, options));
 }
-
-/** Default read tool using process.cwd() for backwards compatibility. */
-export const readToolDefinition = createReadToolDefinition(process.cwd());
-export const readTool = createReadTool(process.cwd());

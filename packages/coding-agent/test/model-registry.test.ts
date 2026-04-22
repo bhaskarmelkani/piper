@@ -229,6 +229,28 @@ describe("ModelRegistry", () => {
 			}
 		});
 
+		test("headers-only override resolves at request time", async () => {
+			writeRawModelsJson({
+				anthropic: {
+					headers: {
+						"X-Custom-Header": "custom-value",
+					},
+				},
+			});
+
+			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
+			expect(registry.getError()).toBeUndefined();
+			const anthropicModels = getModelsForProvider(registry, "anthropic");
+
+			for (const model of anthropicModels) {
+				const auth = await registry.getApiKeyAndHeaders(model);
+				expect(auth.ok).toBe(true);
+				if (auth.ok) {
+					expect(auth.headers?.["X-Custom-Header"]).toBe("custom-value");
+				}
+			}
+		});
+
 		test("baseUrl-only override does not affect other providers", () => {
 			writeRawModelsJson({
 				anthropic: overrideConfig("https://my-proxy.example.com/v1"),
@@ -468,7 +490,7 @@ describe("ModelRegistry", () => {
 			}
 		});
 
-		test("compat schema accepts reasoningEffortMap and supportsStrictMode", () => {
+		test("compat schema accepts reasoningEffortMap, supportsStrictMode, and cacheControlFormat", () => {
 			writeRawModelsJson({
 				demo: {
 					baseUrl: "https://example.com/v1",
@@ -488,6 +510,7 @@ describe("ModelRegistry", () => {
 									high: "max",
 								},
 								supportsStrictMode: false,
+								cacheControlFormat: "anthropic",
 							},
 						},
 					],
@@ -500,6 +523,7 @@ describe("ModelRegistry", () => {
 			expect(registry.getError()).toBeUndefined();
 			expect(compat?.reasoningEffortMap).toEqual({ minimal: "default", high: "max" });
 			expect(compat?.supportsStrictMode).toBe(false);
+			expect(compat?.cacheControlFormat).toBe("anthropic");
 		});
 
 		test("model-level baseUrl overrides provider-level baseUrl for custom models", () => {

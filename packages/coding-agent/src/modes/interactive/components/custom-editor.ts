@@ -114,7 +114,7 @@ export class CustomEditor extends Editor {
 		const cursorPrefix = this.focused ? `${CURSOR_MARKER}\x1b[7m \x1b[0m` : "";
 
 		rendered[1] = `${leftPadding}${cursorPrefix}${truncatedPlaceholder}${trailingSpaces}${rightPadding}`;
-		return removeLowerBorder(rendered);
+		return [...removeLowerBorder(rendered), " ".repeat(width)];
 	}
 
 	handleInput(data: string): void {

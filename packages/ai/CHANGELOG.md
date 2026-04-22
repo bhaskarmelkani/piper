@@ -2,14 +2,16 @@
 
 ## [Unreleased]
 
-### Fixed
-
-- Fixed AJV enum error formatter in tool validation to use `err.params.allowedValue` when available, so "must be one of: …" messages reliably include the allowed literal values.
-
 ### Added
 
 - Added `multiplier?: number` field to the `Model<TApi>` interface for representing premium request multipliers on subscription-based providers.
 - Added `COPILOT_MULTIPLIERS` lookup table to `generate-models.ts`, sourced from the [GitHub Copilot billing docs](https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers), so running `bun run generate-models` embeds the multiplier for each Copilot model directly in `models.generated.ts`.
+
+### Fixed
+
+- Fixed AJV enum error formatter in tool validation to use `err.params.allowedValue` when available, so "must be one of: …" messages reliably include the allowed literal values.
+- Fixed `google-gemini-cli` built-in model discovery to include `gemini-3.1-flash-lite-preview`, so Cloud Code Assist model lists expose it without requiring manual `--model` fallback selection ([#3545](https://github.com/badlogic/pi-mono/issues/3545))
+- Fixed `transformMessages()` to synthesize missing trailing tool results for transcripts that end with unresolved assistant tool calls during direct low-level history replay ([#3555](https://github.com/badlogic/pi-mono/issues/3555))
 
 ## [0.67.68] - 2026-04-17
 

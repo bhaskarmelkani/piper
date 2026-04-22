@@ -26,6 +26,12 @@
   - `[x]` done
   - `[!]` blocked
 - Execute one milestone at a time. Do not start the next milestone until the current one is stable and validated.
+- `plans/HISTORY.md` is the merge-history index for major piper changes. Update it whenever a significant fork-specific change lands or a new major plan starts.
+- Every major fork-specific change must have a plan record under `plans/` so future upstream conflict resolution has a clear decision trail.
+- For major changes, keep three things current together:
+  - the relevant version/topic plan in `plans/<name>/`
+  - `plans/HISTORY.md`
+  - `docs/upstream-sync.md` when the change creates a new conflict surface or merge rule
 
 ## Conversational Style
 

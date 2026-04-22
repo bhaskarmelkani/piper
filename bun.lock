@@ -22,10 +22,10 @@
     },
     "packages/agent": {
       "name": "@mariozechner/pi-agent-core",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "dependencies": {
-        "@mariozechner/pi-ai": "^0.1.0",
-        "@sinclair/typebox": "^0.34.41",
+        "@mariozechner/pi-ai": "^0.4.0",
+        "typebox": "^1.1.24",
       },
       "devDependencies": {
         "@types/node": "^24.3.0",
@@ -35,7 +35,7 @@
     },
     "packages/ai": {
       "name": "@mariozechner/pi-ai",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "bin": {
         "pi-ai": "./dist/cli.js",
       },
@@ -46,12 +46,14 @@
         "@mistralai/mistralai": "^2.2.0",
         "@sinclair/typebox": "^0.34.41",
         "@smithy/node-http-handler": "^4.5.3",
+        "@smithy/types": "^4.9.0",
         "ajv": "^8.17.1",
         "ajv-formats": "^3.0.1",
         "chalk": "^5.6.2",
         "openai": "6.26.0",
         "partial-json": "^0.1.7",
         "proxy-agent": "^6.5.0",
+        "typebox": "^1.1.24",
         "undici": "^7.19.1",
         "zod-to-json-schema": "^3.24.6",
       },
@@ -63,19 +65,18 @@
     },
     "packages/coding-agent": {
       "name": "@mariozechner/pi-coding-agent",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "bin": {
         "piper": "dist/cli.js",
       },
       "dependencies": {
         "@anthropic-ai/sandbox-runtime": "^0.0.16",
         "@mariozechner/jiti": "^2.6.2",
-        "@mariozechner/pi-agent-core": "^0.1.0",
-        "@mariozechner/pi-ai": "^0.1.0",
-        "@mariozechner/pi-tui": "^0.1.0",
+        "@mariozechner/pi-agent-core": "^0.4.0",
+        "@mariozechner/pi-ai": "^0.4.0",
+        "@mariozechner/pi-tui": "^0.4.0",
         "@silvia-odwyer/photon-node": "^0.3.4",
         "@sinclair/typebox": "^0.34.41",
-        "ajv": "^8.17.1",
         "chalk": "^5.5.0",
         "cli-highlight": "^2.1.11",
         "diff": "^8.0.2",
@@ -89,6 +90,7 @@
         "node-pty": "^1.1.0-beta39",
         "proper-lockfile": "^4.1.2",
         "strip-ansi": "^7.1.0",
+        "typebox": "^1.1.24",
         "undici": "^7.19.1",
         "uuid": "^11.1.0",
         "yaml": "^2.8.2",
@@ -109,22 +111,22 @@
     },
     "packages/coding-agent/examples/extensions/custom-provider-anthropic": {
       "name": "pi-extension-custom-provider-anthropic",
-      "version": "0.67.68",
+      "version": "0.68.1",
       "dependencies": {
         "@anthropic-ai/sdk": "^0.52.0",
       },
     },
     "packages/coding-agent/examples/extensions/custom-provider-gitlab-duo": {
       "name": "pi-extension-custom-provider-gitlab-duo",
-      "version": "0.67.68",
+      "version": "0.68.1",
     },
     "packages/coding-agent/examples/extensions/custom-provider-qwen-cli": {
       "name": "pi-extension-custom-provider-qwen-cli",
-      "version": "0.67.68",
+      "version": "0.68.1",
     },
     "packages/coding-agent/examples/extensions/with-deps": {
       "name": "pi-extension-with-deps",
-      "version": "0.67.68",
+      "version": "0.68.1",
       "dependencies": {
         "ms": "^2.1.3",
       },
@@ -134,21 +136,21 @@
     },
     "packages/mom": {
       "name": "@mariozechner/pi-mom",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "bin": {
         "mom": "dist/main.js",
       },
       "dependencies": {
         "@anthropic-ai/sandbox-runtime": "^0.0.16",
-        "@mariozechner/pi-agent-core": "^0.1.0",
-        "@mariozechner/pi-ai": "^0.1.0",
-        "@mariozechner/pi-coding-agent": "^0.1.0",
-        "@sinclair/typebox": "^0.34.0",
+        "@mariozechner/pi-agent-core": "^0.4.0",
+        "@mariozechner/pi-ai": "^0.4.0",
+        "@mariozechner/pi-coding-agent": "^0.4.0",
         "@slack/socket-mode": "^2.0.0",
         "@slack/web-api": "^7.0.0",
         "chalk": "^5.6.2",
         "croner": "^9.1.0",
         "diff": "^8.0.2",
+        "typebox": "^1.1.24",
       },
       "devDependencies": {
         "@types/diff": "^7.0.2",
@@ -158,7 +160,7 @@
     },
     "packages/pods": {
       "name": "@mariozechner/pi",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "bin": {
         "pi-pods": "dist/cli.js",
       },
@@ -169,7 +171,7 @@
     },
     "packages/tui": {
       "name": "@mariozechner/pi-tui",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "dependencies": {
         "@types/mime-types": "^2.1.4",
         "chalk": "^5.5.0",
@@ -187,19 +189,19 @@
     },
     "packages/web-ui": {
       "name": "@mariozechner/pi-web-ui",
-      "version": "0.1.0",
+      "version": "0.4.0",
       "dependencies": {
         "@lmstudio/sdk": "^1.5.0",
-        "@mariozechner/pi-agent-core": "^0.1.0",
-        "@mariozechner/pi-ai": "^0.1.0",
-        "@mariozechner/pi-tui": "^0.1.0",
-        "@sinclair/typebox": "^0.34.41",
+        "@mariozechner/pi-agent-core": "^0.4.0",
+        "@mariozechner/pi-ai": "^0.4.0",
+        "@mariozechner/pi-tui": "^0.4.0",
         "docx-preview": "^0.3.7",
         "highlight.js": "^11.11.1",
         "jszip": "^3.10.1",
         "lucide": "^0.544.0",
         "ollama": "^0.6.0",
         "pdfjs-dist": "5.4.394",
+        "typebox": "^1.1.24",
         "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
       },
       "devDependencies": {
@@ -215,7 +217,7 @@
     },
     "packages/web-ui/example": {
       "name": "pi-web-ui-example",
-      "version": "0.67.68",
+      "version": "0.68.1",
       "dependencies": {
         "@mariozechner/mini-lit": "^0.2.0",
         "@mariozechner/pi-ai": "file:../../ai",
@@ -1359,6 +1361,8 @@
 
     "tunnel-agent": ["tunnel-agent@0.6.0", "", { "dependencies": { "safe-buffer": "^5.0.1" } }, "sha512-McnNiV1l8RYeY8tBgEpuodCC1mLUdbSN+CYBL7kJsJNInOP8UjDDEwdk6Mw60vdLLrr5NHKZhMAOSrR2NZuQ+w=="],
 
+    "typebox": ["typebox@1.1.31", "", {}, "sha512-bFTa/YRd11e9a+C+hBlUSmD3DnDRnkcHqaUWX4zoq3q4u5WLnuLPc7yLpO5dRO7Z9VPXcm/GzFkvrH5FkDobeg=="],
+
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 
     "uhtml": ["uhtml@5.0.9", "", { "dependencies": { "@webreflection/alien-signals": "^0.3.2" } }, "sha512-qPyu3vGilaLe6zrjOCD/xezWEHLwdevxmbY3hzyhT25KBDF4F7YYW3YZcL3kylD/6dMoVISHjn8ggV3+9FY+5g=="],
@@ -1490,6 +1494,8 @@
     "path-scurry/lru-cache": ["lru-cache@11.3.5", "", {}, "sha512-NxVFwLAnrd9i7KUBxC4DrUhmgjzOs+1Qm50D3oF1/oL+r1NpZ4gA7xvG0/zJ8evR7zIKn4vLf7qTNduWFtCrRw=="],
 
     "pi-extension-custom-provider-anthropic/@anthropic-ai/sdk": ["@anthropic-ai/sdk@0.52.0", "", { "bin": { "anthropic-ai-sdk": "bin/cli" } }, "sha512-d4c+fg+xy9e46c8+YnrrgIQR45CZlAi7PwdzIfDXDM6ACxEZli1/fxhURsq30ZpMZy6LvSkr41jGq5aF5TD7rQ=="],
+
+    "pi-web-ui-example/@mariozechner/pi-web-ui": ["@mariozechner/pi-web-ui@file:packages/web-ui", { "dependencies": { "@lmstudio/sdk": "^1.5.0", "@mariozechner/pi-agent-core": "^0.4.0", "@mariozechner/pi-ai": "^0.4.0", "@mariozechner/pi-tui": "^0.4.0", "docx-preview": "^0.3.7", "highlight.js": "^11.11.1", "jszip": "^3.10.1", "lucide": "^0.544.0", "ollama": "^0.6.0", "pdfjs-dist": "5.4.394", "typebox": "^1.1.24", "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz" }, "devDependencies": { "@mariozechner/mini-lit": "^0.2.0", "@tailwindcss/cli": "^4.0.0-beta.14", "concurrently": "^9.2.1", "typescript": "^5.7.3" }, "peerDependencies": { "@mariozechner/mini-lit": "^0.2.0", "lit": "^3.3.1" } }],
 
     "protobufjs/@types/node": ["@types/node@24.12.2", "", { "dependencies": { "undici-types": "~7.16.0" } }, "sha512-A1sre26ke7HDIuY/M23nd9gfB+nrmhtYyMINbjI1zHJxYteKR6qSMX56FsmjMcDb3SMcjJg5BiRRgOCC/yBD0g=="],
 

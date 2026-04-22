@@ -51,6 +51,19 @@ export interface AppKeybindings {
 	"app.transcript.pageDown": true;
 	"app.transcript.scrollTop": true;
 	"app.transcript.scrollBottom": true;
+	"app.models.save": true;
+	"app.models.enableAll": true;
+	"app.models.clearAll": true;
+	"app.models.toggleProvider": true;
+	"app.models.reorderUp": true;
+	"app.models.reorderDown": true;
+	"app.tree.filter.default": true;
+	"app.tree.filter.noTools": true;
+	"app.tree.filter.userOnly": true;
+	"app.tree.filter.labeledOnly": true;
+	"app.tree.filter.all": true;
+	"app.tree.filter.cycleForward": true;
+	"app.tree.filter.cycleBackward": true;
 }
 
 export type AppKeybinding = keyof AppKeybindings;
@@ -184,6 +197,58 @@ export const KEYBINDINGS = {
 	"app.transcript.scrollBottom": {
 		defaultKeys: "shift+end",
 		description: "Scroll transcript to newest content",
+	},
+	"app.models.save": {
+		defaultKeys: "ctrl+s",
+		description: "Save model selection",
+	},
+	"app.models.enableAll": {
+		defaultKeys: "ctrl+a",
+		description: "Enable all models",
+	},
+	"app.models.clearAll": {
+		defaultKeys: "ctrl+x",
+		description: "Clear all models",
+	},
+	"app.models.toggleProvider": {
+		defaultKeys: "ctrl+p",
+		description: "Toggle all models for provider",
+	},
+	"app.models.reorderUp": {
+		defaultKeys: "alt+up",
+		description: "Move model up in order",
+	},
+	"app.models.reorderDown": {
+		defaultKeys: "alt+down",
+		description: "Move model down in order",
+	},
+	"app.tree.filter.default": {
+		defaultKeys: "ctrl+d",
+		description: "Tree filter: default view",
+	},
+	"app.tree.filter.noTools": {
+		defaultKeys: "ctrl+t",
+		description: "Tree filter: hide tool results",
+	},
+	"app.tree.filter.userOnly": {
+		defaultKeys: "ctrl+u",
+		description: "Tree filter: user messages only",
+	},
+	"app.tree.filter.labeledOnly": {
+		defaultKeys: "ctrl+l",
+		description: "Tree filter: labeled entries only",
+	},
+	"app.tree.filter.all": {
+		defaultKeys: "ctrl+a",
+		description: "Tree filter: show all entries",
+	},
+	"app.tree.filter.cycleForward": {
+		defaultKeys: "ctrl+o",
+		description: "Tree filter: cycle forward",
+	},
+	"app.tree.filter.cycleBackward": {
+		defaultKeys: "shift+ctrl+o",
+		description: "Tree filter: cycle backward",
 	},
 } as const satisfies KeybindingDefinitions;
 

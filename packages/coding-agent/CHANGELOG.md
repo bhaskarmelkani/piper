@@ -5,92 +5,33 @@
 ### Added
 
 - Added `paths: string[]` to `search_code` schema for multi-root searches; all three backends (rg, fd, ast-grep) receive the full path list natively, and results are displayed relative to cwd.
-- Added candidate line numbers to `edit` tool's ambiguous-match error — when `oldText` matches N>1 occurrences, the error now lists the line numbers of each occurrence so the model can disambiguate without re-reading the file.
+- Added candidate line numbers to `edit` tool's ambiguous-match error. When `oldText` matches multiple occurrences, the error now lists the line numbers of each occurrence so the model can disambiguate without re-reading the file.
+- Added `structured-output.ts` extension example plus extension docs for terminating tool results, showing how a custom tool can return `terminate: true` so the agent ends on the tool call without an extra follow-up LLM turn ([#3525](https://github.com/badlogic/pi-mono/issues/3525))
+- Added OSC 9;4 terminal progress indicators during agent streaming and compaction, so terminals like iTerm2, WezTerm, Windows Terminal, and Kitty show activity in their tab bar
+- Added `ctx.ui.addAutocompleteProvider(...)` for stacking extension autocomplete providers on top of the built-in slash/path provider, plus a `github-issue-autocomplete.ts` example and extension docs ([#2983](https://github.com/badlogic/pi-mono/issues/2983))
 
 ### Fixed
 
-- Fixed `search_code` flag injection: queries starting with `--` (e.g. `--models`) no longer get parsed as ripgrep flags — a `--` separator is now inserted before the query in all keyword/regex invocations.
+- Fixed `search_code` flag injection: queries starting with `--` (for example `--models`) no longer get parsed as ripgrep flags, because a `--` separator is now inserted before the query in all keyword and regex invocations.
 - Fixed AJV enum error formatter in tool-call validation to use `err.params.allowedValue` when available, ensuring "must be one of: …" messages always include the allowed values.
-- Fixed transcript spacing: turn boundaries (before each user message, compaction summary, and branch summary) now use two blank lines instead of one for better visual breathing room.
+- Fixed transcript spacing so turn boundaries before each user message, compaction summary, and branch summary now use two blank lines instead of one.
 - Routed TPS metrics from the TUI transcript to the sidebar Session Health section via `setSidebarSections`, removing the per-turn stats line from the chat transcript.
-- Shortened tool-call IDs in HTML session exports from provider-generated tokens (~700 chars) to sequential short IDs (`call_0001`, …). Original IDs are preserved in a `debugIds` map for troubleshooting.
+- Shortened tool-call IDs in HTML session exports from provider-generated tokens to sequential short IDs such as `call_0001`. Original IDs are preserved in a `debugIds` map for troubleshooting.
+- Fixed `ctx.getSystemPrompt()` inside `before_agent_start` to reflect chained system-prompt changes made by earlier `before_agent_start` handlers, and clarified the extension docs around provider-payload rewrites and what `ctx.getSystemPrompt()` does and does not report ([#3539](https://github.com/badlogic/pi-mono/issues/3539))
+- Fixed built-in `google-gemini-cli` model lists and selector entries to include `gemini-3.1-flash-lite-preview`, so Cloud Code Assist users no longer need manual `--model` fallback selection to use it ([#3545](https://github.com/badlogic/pi-mono/issues/3545))
+- Fixed extension session-replacement flows so `ctx.newSession()`, `ctx.fork()`, `ctx.switchSession()`, and imported-session replacements fully rebind before post-switch work runs, added `withSession` replacement callbacks with fresh `ReplacedSessionContext` helpers, and make stale pre-replacement `pi` / `ctx` session-bound accesses throw instead of silently targeting the wrong session ([#2860](https://github.com/badlogic/pi-mono/issues/2860))
+- Fixed `models.json` built-in provider overrides to accept `headers` without requiring `baseUrl`, so request-header-only overrides now load and apply correctly ([#3538](https://github.com/badlogic/pi-mono/issues/3538))
 
 ### Changed
 
 - Updated `symbols_overview` system-prompt guideline to mention the ~300-line threshold and quantify the read-count savings.
-- Added system-prompt nudge for multi-file change replies to open with a one-line verdict then ≤3 decision bullets.
+- Added a system-prompt nudge for multi-file change replies to open with a one-line verdict followed by at most three decision bullets.
 - Added system-prompt nudge to use a scout subagent for symbol-lookup questions instead of repeated `search_code` calls.
-
 - Fixed authoritative GitHub Copilot model visibility to hide models omitted from successful `/models` responses while keeping failed policy fetches non-authoritative, and routed the behavior through a provider model-visibility adapter so provider-specific login rules stay isolated.
 
-## [0.4.0] - 2026-04-20
+### Breaking Changes
 
-### Added
-
-- Added `search_code` tool for high-signal code discovery via keyword, regex, filename, and AST-based structural search. Supports `glob`, `language`, `context`, and `ignoreCase` filtering. Routes to ripgrep (keyword/regex), fd (filename), and ast-grep (structural).
-- Added `symbols_overview` tool for file and folder symbol summaries. File scope lists top-level symbols with line anchors for TypeScript/JavaScript and generic fallback for other languages. Folder scope scores and summarizes the most relevant files.
-- Added built-in `subagent` tool with single, parallel, and chain execution modes for divide-and-conquer code work. Automatically spawns read-only sidecars (`scout`, `planner`, `reviewer`) with role-aware model selection.
-- Added fixed role system for subagents: `scout` (read-only exploration), `planner` (plan synthesis), `reviewer` (read-only inspection), `worker` (write-capable execution).
-- Added model policy for automatic model downselection: `scout` prefers cheaper/faster siblings, `planner` and `reviewer` prefer mid-tier reasoning models, all with safe fallback to current model.
-- Added delegation scheduler that automatically suggests read-only sidecar hints for code exploration and planning tasks, respecting recursion and mutation guards.
-- Added subagent transcript rendering: compact grouped activity block showing role, status, and model, with expanded view showing task, tool calls, usage, and final output.
-
-### Fixed
-
-- Fixed parallel subagent mode to send untruncated scout output to main LLM for proper synthesis (was limited to 120 chars per scout).
-- Fixed `search_code` filename search to avoid redundant glob filtering that could silently drop valid results when `glob` or `language` options were used.
-- Fixed `search_code` filename search `hitLimit` detection to only report truncation when the user-specified limit was actually reached (not when post-filters removed entries).
-- Fixed `runFd` function to use consistent `settle()` guard pattern with `runRg` and `runAst` for proper abort handling and preventing double-resolution.
-- Fixed subagent recursion guard to properly read `PI_SUBAGENT_DEPTH` env var and exclude `subagent` tool from child sessions.
-- Fixed subagent scheduler mutation guard to correctly observe mutations from previous rounds in the same turn.
-
-### Changed
-
-- Changed default tool surface from `[read, bash, edit, write]` to `[read, bash, edit, write, search_code, symbols_overview, subagent]`.
-- Changed system prompt to prefer `search_code` and `symbols_overview` for code navigation, using `read` only after targeted evidence is gathered.
-
-## [0.2.0] - 2026-04-19
-
-### Added
-
-- Added `/skills` command for intelligent skill management. Users can now enable/disable skills per-project to reduce context bloat. Disabled skills are hidden from the system prompt (saving context tokens) but remain invokable via `/skill:name`. Selection persists to project `.pi/settings.json`.
-- Added skill selector component with fuzzy search, checkbox list, detail view, and keybinding support. Includes `Ctrl+A` to enable all and `Ctrl+X` to disable all.
-- Added skill count in sidebar showing active vs. total skills (e.g., "Skills: 30/60 active").
-- Added GitHub Copilot model multipliers to the model selector. Multiplier values (e.g. `x0`, `x0.33`, `x1`, `x3`) are shown next to each model name so users can see the premium request cost at a glance. The static table is sourced from the [GitHub Copilot billing docs](https://docs.github.com/en/copilot/concepts/billing/copilot-requests#model-multipliers) and is updated at build time via `generate-models`. The live Copilot API is used as the authoritative source when available; the static table is the fallback.
-- Added grouping and sorting in the model selector. Models are sorted by provider then family (e.g. `claude-opus`, `claude-sonnet`, `gpt-5`) and a dim group header appears between families when no search filter is active.
-- Added spacing between sidebar sections. Built-in fields (Model, Thinking, Workspace, Git, Status) and extension-provided sections are now separated by blank lines for easier scanning.
-
-### Changed
-
-- Changed cursor character from space to π symbol in the interactive editor when focused and empty, matching the piper visual identity.
-
-### Fixed
-
-- Fixed the thinking selector to remove inconsistent bottom border for UI consistency.
-- Fixed the interactive composer to show a dim placeholder when empty and use a padded default left margin instead of rendering flush against the dock border.
-
-## [0.1.0] - 2026-04-19 - 2026-04-19
-
-### Changed
-
-- Changed piper interactive mode to use a fixed shell layout with a persistent bottom dock, a responsive right sidebar, and an independently scrollable transcript pane.
-- Changed sidebar extension sections to support keyed composition with deterministic ordering, so built-in resources and extension-provided sidebar content can coexist.
-- Changed terminal mouse mode from SGR button capture (?1000h) to alternate scroll mode (?1007h), enabling native terminal text selection without holding Shift while keeping scroll wheel functional.
-- Changed all tooling scripts (version bumping, publishing, browser smoke check) to use Bun instead of Node.js/npm, completing the Bun-only runtime setup.
-- Changed update notification to check piper's own npm package (`piper-ai`) and link to piper's changelog, so false "update available" messages from the upstream `@mariozechner/pi-coding-agent` package no longer appear.
-
-### Fixed
-
-- Fixed in-session selectors, prompts, and login/provider flows to render inside the bottom dock instead of pausing the TUI with a full-terminal Clack takeover.
-- Fixed interactive edit diff rendering to use the built-in renderer again instead of requiring external `delta`.
-- Fixed sidebar context signaling to use consistent semantic thresholds in both the right sidebar and footer.
-- Fixed scroll wheel routing to use Up/Down cursor key events from alternate scroll mode, with smooth lerp animation preserved.
-
-### Added
-
-- Added semantic sidebar rendering for thinking and context state, including level-aware thinking colors and a compact context progress bar.
-- Added `examples/extensions/copilot-budget.ts`, a keyed sidebar example extension that shows GitHub Copilot premium request usage.
-- Added `scripts/bump-version.mjs` to replace `npm version -ws` for lockstep version bumping across all workspace packages.
+- Session-replacement commands now invalidate captured pre-replacement session-bound extension objects after `ctx.newSession()`, `ctx.fork()`, and `ctx.switchSession()`. Old `pi` and command `ctx` references now throw instead of silently targeting the replaced session. Migration: if code needs to keep working in the replacement session after one of those calls, pass `withSession` to that same method and do the post-switch work there. In practice, move post-switch `pi.sendUserMessage()`, `pi.sendMessage()`, and command-ctx/session-manager access into `withSession`, and use only the `ReplacedSessionContext` passed to that callback for session-bound operations. Footguns: `withSession` runs after the old extension instance has already received `session_shutdown`, old cleanup may already have invalidated captured state, captured old `pi` and old command `ctx` are stale, and previously extracted raw objects such as `const sm = ctx.sessionManager` remain the caller's responsibility and must not be reused after the switch.
 
 ## [0.67.68] - 2026-04-17
 
@@ -1324,7 +1265,7 @@ Examples:
 
 ### Changed
 
-- Share URLs now use pi.dev by default while shittycodingagent.ai and buildwithpi.ai continue to work.
+- Share URLs now use pi.dev by default while pi.dev and buildwithpi.ai continue to work.
 
 ### Fixed
 
@@ -1927,7 +1868,7 @@ There are multiple SDK breaking changes since v0.49.3. For the quickest migratio
 
 ### Changed
 
-- `/share` now outputs `buildwithpi.ai` session preview URLs instead of `shittycodingagent.ai`
+- `/share` now outputs `buildwithpi.ai` session preview URLs instead of `pi.dev`
 
 ## [0.45.0] - 2026-01-13
 
@@ -2849,7 +2790,7 @@ Total color count increased from 46 to 50. See [docs/themes.md](docs/themes.md) 
 
 - `ctx.ui.setStatus(key, text)` for hooks to display persistent status text in the footer ([#385](https://github.com/badlogic/pi-mono/pull/385) by [@prateekmedia](https://github.com/prateekmedia))
 - `ctx.ui.theme` getter for styling status text and other output with theme colors
-- `/share` command to upload session as a secret GitHub gist and get a shareable URL via shittycodingagent.ai ([#380](https://github.com/badlogic/pi-mono/issues/380))
+- `/share` command to upload session as a secret GitHub gist and get a shareable URL via pi.dev ([#380](https://github.com/badlogic/pi-mono/issues/380))
 - HTML export now includes a tree visualization sidebar for navigating session branches ([#375](https://github.com/badlogic/pi-mono/issues/375))
 - HTML export supports keyboard shortcuts: Ctrl+T to toggle thinking blocks, Ctrl+O to toggle tool outputs
 - HTML export supports theme-configurable background colors via optional `export` section in theme JSON ([#387](https://github.com/badlogic/pi-mono/pull/387) by [@mitsuhiko](https://github.com/mitsuhiko))
