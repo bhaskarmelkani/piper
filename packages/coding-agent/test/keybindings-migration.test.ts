@@ -3,7 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { ENV_AGENT_DIR } from "../src/config.js";
-import { KeybindingsManager } from "../src/core/keybindings.js";
+import { KEYBINDINGS, KeybindingsManager } from "../src/core/keybindings.js";
 import { runMigrations } from "../src/migrations.js";
 
 describe("keybindings migration", () => {
@@ -84,5 +84,10 @@ describe("keybindings migration", () => {
 		const effective = keybindings.getEffectiveConfig();
 		expect(effective["tui.select.confirm"]).toBe("enter");
 		expect(effective["app.interrupt"]).toBe("ctrl+x");
+	});
+
+	it("defines default keybindings for plan and edit toggles", () => {
+		expect(KEYBINDINGS["app.plan.toggle"].defaultKeys).toBe("shift+tab");
+		expect(KEYBINDINGS["app.edit.toggle"].defaultKeys).toBe("ctrl+shift+e");
 	});
 });

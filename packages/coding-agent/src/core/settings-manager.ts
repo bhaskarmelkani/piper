@@ -97,7 +97,8 @@ export interface Settings {
 	showHardwareCursor?: boolean; // Show terminal cursor while still positioning it for IME
 	markdown?: MarkdownSettings;
 	sessionDir?: string; // Custom session storage directory (same format as --session-dir CLI flag)
-	teamMode?: boolean; // default: false — plan-first execution, pre-mutation approval, worker-per-milestone
+	planMode?: boolean; // default: false — always plan first for each new turn
+	editMode?: boolean; // default: true — allows repo edits without pre-edit confirmation
 	fastModel?: string; // model ID used for scout subagents and meta tasks (e.g. "gpt-5-mini"); defaults to cheapest in-provider model
 }
 
@@ -997,13 +998,23 @@ export class SettingsManager {
 		return this.settings.markdown?.codeBlockIndent ?? "  ";
 	}
 
-	getTeamMode(): boolean {
-		return this.settings.teamMode ?? false;
+	getPlanMode(): boolean {
+		return this.settings.planMode ?? false;
 	}
 
-	setTeamMode(enabled: boolean): void {
-		this.globalSettings.teamMode = enabled;
-		this.markModified("teamMode");
+	setPlanMode(enabled: boolean): void {
+		this.globalSettings.planMode = enabled;
+		this.markModified("planMode");
+		this.save();
+	}
+
+	getEditMode(): boolean {
+		return this.settings.editMode ?? true;
+	}
+
+	setEditMode(enabled: boolean): void {
+		this.globalSettings.editMode = enabled;
+		this.markModified("editMode");
 		this.save();
 	}
 

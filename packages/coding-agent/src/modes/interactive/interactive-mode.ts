@@ -2008,7 +2008,9 @@ export class InteractiveMode {
 		this.applyRuntimeSettings();
 		await this.bindCurrentSessionExtensions();
 		this.subscribeToAgent();
-		await this.updateAvailableProviderCount();
+		// Fire provider count refresh in the background — it makes network calls to check
+		// model visibility adapters and must not block the UI from responding.
+		void this.updateAvailableProviderCount().then(() => this.ui.requestRender());
 		this.updateEditorBorderColor();
 		this.updateTerminalTitle();
 	}
@@ -2741,6 +2743,11 @@ export class InteractiveMode {
 		// so they work correctly regardless of which editor is active
 		this.defaultEditor.onEscape = () => {
 			if (this.loadingAnimation) {
+				// Stop the spinner immediately — agent_end will clean up the rest.
+				this.loadingAnimation.stop();
+				this.loadingAnimation = undefined;
+				this.statusContainer.clear();
+				this.ui.requestRender();
 				this.restoreQueuedMessagesToEditor({ abort: true });
 			} else if (this.session.isBashRunning) {
 				this.session.abortBash();
@@ -2772,6 +2779,8 @@ export class InteractiveMode {
 		this.defaultEditor.onCtrlD = () => this.handleCtrlD();
 		this.defaultEditor.onAction("app.suspend", () => this.handleCtrlZ());
 		this.defaultEditor.onAction("app.thinking.cycle", () => this.cycleThinkingLevel());
+		this.defaultEditor.onAction("app.plan.toggle", () => this.setPlanMode(!this.settingsManager.getPlanMode()));
+		this.defaultEditor.onAction("app.edit.toggle", () => this.setEditMode(!this.settingsManager.getEditMode()));
 		this.defaultEditor.onAction("app.model.cycleForward", () => this.cycleModel("forward"));
 		this.defaultEditor.onAction("app.model.cycleBackward", () => this.cycleModel("backward"));
 
@@ -2836,6 +2845,18 @@ export class InteractiveMode {
 			if (text === "/settings") {
 				this.showSettingsSelector();
 				this.editor.setText("");
+				return;
+			}
+			if (text === "/plan" || text.startsWith("/plan ")) {
+				const value = text.startsWith("/plan ") ? text.slice(6).trim() : undefined;
+				this.editor.setText("");
+				this.handlePlanCommand(value);
+				return;
+			}
+			if (text === "/edit" || text.startsWith("/edit ")) {
+				const value = text.startsWith("/edit ") ? text.slice(6).trim() : undefined;
+				this.editor.setText("");
+				this.handleEditCommand(value);
 				return;
 			}
 			if (text === "/scoped-models") {
@@ -2908,7 +2929,7 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
-			if (text === "/hotkeys") {
+			if (text === "/hotkeys" || text === "/shortcut") {
 				this.handleHotkeysCommand();
 				this.editor.setText("");
 				return;
@@ -4136,6 +4157,8 @@ export class InteractiveMode {
 			const selector = new SettingsSelectorComponent(
 				{
 					autoCompact: this.session.autoCompactionEnabled,
+					planMode: this.settingsManager.getPlanMode(),
+					editMode: this.settingsManager.getEditMode(),
 					showImages: this.settingsManager.getShowImages(),
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
 					blockImages: this.settingsManager.getBlockImages(),
@@ -4162,6 +4185,12 @@ export class InteractiveMode {
 					onAutoCompactChange: (enabled) => {
 						this.session.setAutoCompactionEnabled(enabled);
 						this.footer.setAutoCompactEnabled(enabled);
+					},
+					onPlanModeChange: (enabled) => {
+						this.setPlanMode(enabled);
+					},
+					onEditModeChange: (enabled) => {
+						this.setEditMode(enabled);
 					},
 					onShowImagesChange: (enabled) => {
 						this.settingsManager.setShowImages(enabled);
@@ -4267,6 +4296,46 @@ export class InteractiveMode {
 			);
 			return { component: selector, focus: selector.getSettingsList() };
 		});
+	}
+
+	private setPlanMode(enabled: boolean): void {
+		this.settingsManager.setPlanMode(enabled);
+		this.session.rebuildSystemPrompt();
+		this.ui.requestRender();
+		this.showStatus(`Plan mode: ${enabled ? "on" : "off"}`);
+	}
+
+	private setEditMode(enabled: boolean): void {
+		this.settingsManager.setEditMode(enabled);
+		this.session.rebuildSystemPrompt();
+		this.ui.requestRender();
+		this.showStatus(`Edit mode: ${enabled ? "on" : "off"}`);
+	}
+
+	private handlePlanCommand(value?: string): void {
+		const normalized = value?.toLowerCase();
+		if (normalized === undefined || normalized === "") {
+			this.setPlanMode(!this.settingsManager.getPlanMode());
+			return;
+		}
+		if (normalized !== "on" && normalized !== "off") {
+			this.showError("Usage: /plan [on|off]");
+			return;
+		}
+		this.setPlanMode(normalized === "on");
+	}
+
+	private handleEditCommand(value?: string): void {
+		const normalized = value?.toLowerCase();
+		if (normalized === undefined || normalized === "") {
+			this.setEditMode(!this.settingsManager.getEditMode());
+			return;
+		}
+		if (normalized !== "on" && normalized !== "off") {
+			this.showError("Usage: /edit [on|off]");
+			return;
+		}
+		this.setEditMode(normalized === "on");
 	}
 
 	private handleThinkingCommand(levelText?: string): void {
@@ -5428,6 +5497,8 @@ export class InteractiveMode {
 		const exit = this.getAppKeyDisplay("app.exit");
 		const suspend = this.getAppKeyDisplay("app.suspend");
 		const cycleThinkingLevel = this.getAppKeyDisplay("app.thinking.cycle");
+		const togglePlanMode = this.getAppKeyDisplay("app.plan.toggle");
+		const toggleEditMode = this.getAppKeyDisplay("app.edit.toggle");
 		const cycleModelForward = this.getAppKeyDisplay("app.model.cycleForward");
 		const selectModel = this.getAppKeyDisplay("app.model.select");
 		const expandTools = this.getAppKeyDisplay("app.tools.expand");
@@ -5472,6 +5543,8 @@ export class InteractiveMode {
 | \`${exit}\` | Exit (when editor is empty) |
 | \`${suspend}\` | Suspend to background |
 | \`${cycleThinkingLevel}\` | Cycle thinking level |
+| \`${togglePlanMode}\` | Toggle plan mode |
+| \`${toggleEditMode}\` | Toggle edit mode |
 | \`${cycleModelForward}\` / \`${cycleModelBackward}\` | Cycle models |
 | \`${selectModel}\` | Open model selector |
 | \`${expandTools}\` | Toggle tool output expansion |

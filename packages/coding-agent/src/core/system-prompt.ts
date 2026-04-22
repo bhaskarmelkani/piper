@@ -8,8 +8,10 @@ import { formatSkillsForPrompt, type Skill } from "./skills.js";
 export interface BuildSystemPromptOptions {
 	/** Custom system prompt (replaces default). */
 	customPrompt?: string;
-	/** Enable team mode: plan-first execution, pre-mutation approval, worker-per-milestone. Default: false. */
-	teamMode?: boolean;
+	/** When true, plan-first execution is enabled for every turn. Default: false. */
+	planMode?: boolean;
+	/** When false, repo edits require confirmation before edit/write. Default: true. */
+	editMode?: boolean;
 	/** When true, inject a strong directive to stop direct file reads and use a subagent instead. */
 	explorationNudge?: boolean;
 	/** Tools to include in prompt. Default: [read, bash, edit, write, search_code, symbols_overview, subagent] */
@@ -34,7 +36,8 @@ export interface BuildSystemPromptOptions {
 export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): string {
 	const {
 		customPrompt,
-		teamMode,
+		planMode,
+		editMode,
 		explorationNudge,
 		selectedTools,
 		toolSnippets,
@@ -168,15 +171,17 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions = {}): strin
 		);
 	}
 	const hasWrite = tools.includes("write") || tools.includes("edit");
-	if (teamMode && hasWrite) {
+	if (editMode === false && hasWrite) {
 		addGuideline(
-			"Before touching any files: use the confirm tool to list the files you plan to create or modify and ask the user to proceed — do not call edit or write until confirmed",
+			"Before editing any non-.plans files: use the confirm tool to list the files you plan to modify and ask the user to proceed — do not call edit or write until confirmed",
+		);
+	}
+	if (planMode && hasWrite) {
+		addGuideline(
+			"When plan mode is on: create or update the provided .plans file before editing repo files, do not ask permission to write that plan file, and continue execution after the plan is written",
 		);
 		addGuideline(
-			"For tasks touching multiple files or requiring multiple steps: write a plan to .plans/<YYYYMMDD-HHmmss>-<slug>.md with milestone steps in [ ] not started / [~] in progress / [x] done / [!] blocked format before editing anything",
-		);
-		addGuideline(
-			"Execute each milestone using a worker subagent — pass the milestone step as the task — so the main context stays clean. Update the plan file after each milestone completes or fails",
+			"The plan must include: title, summary, success criteria, constraints or notes, affected areas, and milestone checklist items using [ ]/[~]/[x]/[!] markers. Each milestone must state both the change and its validation",
 		);
 	}
 	if (hasBash && !hasSearchCode && !hasGrep && !hasFind && !hasLs) {

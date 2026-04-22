@@ -16,6 +16,8 @@ export interface AppKeybindings {
 	"app.exit": true;
 	"app.suspend": true;
 	"app.thinking.cycle": true;
+	"app.plan.toggle": true;
+	"app.edit.toggle": true;
 	"app.model.cycleForward": true;
 	"app.model.cycleBackward": true;
 	"app.model.select": true;
@@ -67,8 +69,16 @@ export const KEYBINDINGS = {
 		description: "Suspend to background",
 	},
 	"app.thinking.cycle": {
-		defaultKeys: "shift+tab",
+		defaultKeys: "alt+t",
 		description: "Cycle thinking level",
+	},
+	"app.plan.toggle": {
+		defaultKeys: "shift+tab",
+		description: "Toggle plan mode",
+	},
+	"app.edit.toggle": {
+		defaultKeys: "ctrl+shift+e",
+		description: "Toggle edit mode",
 	},
 	"app.model.cycleForward": {
 		defaultKeys: "ctrl+p",

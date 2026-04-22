@@ -30,6 +30,8 @@ const THINKING_DESCRIPTIONS: Record<ThinkingLevel, string> = {
 
 export interface SettingsConfig {
 	autoCompact: boolean;
+	planMode: boolean;
+	editMode: boolean;
 	showImages: boolean;
 	autoResizeImages: boolean;
 	blockImages: boolean;
@@ -55,6 +57,8 @@ export interface SettingsConfig {
 
 export interface SettingsCallbacks {
 	onAutoCompactChange: (enabled: boolean) => void;
+	onPlanModeChange: (enabled: boolean) => void;
+	onEditModeChange: (enabled: boolean) => void;
 	onShowImagesChange: (enabled: boolean) => void;
 	onAutoResizeImagesChange: (enabled: boolean) => void;
 	onBlockImagesChange: (blocked: boolean) => void;
@@ -162,6 +166,20 @@ export class SettingsSelectorComponent extends Container {
 				label: "Auto-compact",
 				description: "Automatically compact context when it gets too large",
 				currentValue: config.autoCompact ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "plan-mode",
+				label: "Plan mode",
+				description: "Always create or update a .plans file before repo edits",
+				currentValue: config.planMode ? "true" : "false",
+				values: ["true", "false"],
+			},
+			{
+				id: "edit-mode",
+				label: "Edit mode",
+				description: "Allow repo edits without pre-edit confirmation",
+				currentValue: config.editMode ? "true" : "false",
 				values: ["true", "false"],
 			},
 			{
@@ -374,6 +392,12 @@ export class SettingsSelectorComponent extends Container {
 				switch (id) {
 					case "autocompact":
 						callbacks.onAutoCompactChange(newValue === "true");
+						break;
+					case "plan-mode":
+						callbacks.onPlanModeChange(newValue === "true");
+						break;
+					case "edit-mode":
+						callbacks.onEditModeChange(newValue === "true");
 						break;
 					case "show-images":
 						callbacks.onShowImagesChange(newValue === "true");
