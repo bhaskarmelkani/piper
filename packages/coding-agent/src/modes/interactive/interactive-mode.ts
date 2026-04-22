@@ -406,7 +406,6 @@ export class InteractiveMode {
 		this.dockTransientContainer = new Container();
 		this.dockHintsText = new Text("", SHELL_LEFT_INSET, 0);
 		this.dockHints = new Container();
-		this.dockHints.addChild(new Spacer(1));
 		this.dockHints.addChild(this.dockHintsText);
 		this.shellLayout = new HorizontalSplit(
 			this.transcriptViewport,

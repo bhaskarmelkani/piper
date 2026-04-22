@@ -99,6 +99,11 @@ export class CustomEditor extends Editor {
 			if (this.isShowingAutocomplete()) {
 				return withGapBeforeAutocomplete(withoutLowerBorder, width, this.getAutocompleteLineCount(width));
 			}
+			// When a placeholder is configured, always include the spacing line so the
+			// hints bar stays at a fixed position regardless of whether text is present.
+			if (this.placeholder) {
+				return [...withoutLowerBorder, " ".repeat(width)];
+			}
 			return withoutLowerBorder;
 		}
 

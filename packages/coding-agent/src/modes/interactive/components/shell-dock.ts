@@ -62,18 +62,18 @@ export class ShellDockComponent implements Component {
 			}
 			const availableForTransient = Math.max(0, maxHeight - fixedLines.length);
 			const clippedTransient = transientLines.slice(0, availableForTransient);
-			return [...hintLines, ...clippedTransient, ...footerLines];
+			return [...clippedTransient, ...hintLines, ...footerLines];
 		}
 
 		const editorLines = this.editor.render(width);
 		const belowEditorLines = this.belowEditor.render(width);
-		const fixedLines = [...hintLines, ...editorLines, ...belowEditorLines, ...footerLines];
+		const fixedLines = [...editorLines, ...hintLines, ...belowEditorLines, ...footerLines];
 		if (fixedLines.length >= maxHeight) {
 			return fixedLines.slice(Math.max(0, fixedLines.length - maxHeight));
 		}
 
 		const availableForTransient = Math.max(0, maxHeight - fixedLines.length);
 		const clippedTransient = transientLines.slice(0, availableForTransient);
-		return [...hintLines, ...clippedTransient, ...editorLines, ...belowEditorLines, ...footerLines];
+		return [...clippedTransient, ...editorLines, ...hintLines, ...belowEditorLines, ...footerLines];
 	}
 }
