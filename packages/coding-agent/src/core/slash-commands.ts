@@ -16,6 +16,8 @@ export interface BuiltinSlashCommand {
 
 export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "settings", description: "Open settings menu" },
+	{ name: "plan", description: "Toggle plan mode, or set explicitly: /plan [on|off]" },
+	{ name: "edit", description: "Toggle edit mode, or set explicitly: /edit [on|off]" },
 	{ name: "model", description: "Select model (opens selector UI)" },
 	{ name: "thinking", description: "Set thinking level or open selector UI" },
 	{ name: "skills", description: "Enable/disable skills for context injection" },
@@ -28,6 +30,7 @@ export const BUILTIN_SLASH_COMMANDS: ReadonlyArray<BuiltinSlashCommand> = [
 	{ name: "session", description: "Show session info and stats" },
 	{ name: "changelog", description: "Show changelog entries" },
 	{ name: "hotkeys", description: "Show all keyboard shortcuts" },
+	{ name: "shortcut", description: "Show all keyboard shortcuts" },
 	{ name: "fork", description: "Create a new fork from a previous message" },
 	{ name: "tree", description: "Navigate session tree (switch branches)" },
 	{ name: "login", description: "Login with OAuth provider" },

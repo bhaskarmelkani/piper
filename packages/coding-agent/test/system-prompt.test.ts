@@ -106,9 +106,61 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(prompt).toContain("Use search_code for keyword, regex, filename, or AST discovery before bash");
-			expect(prompt).toContain("Use symbols_overview before opening large files or folders");
-			expect(prompt).toContain("Use read only on the most relevant files after search_code and symbols_overview");
+			expect(prompt).toContain("For files over ~300 lines, use symbols_overview before paging through with read");
+			expect(prompt).toContain(
+				"Use read with paths[] to read multiple files in one call; use it only on the most relevant files after search_code and symbols_overview",
+			);
 			expect(prompt).toContain("Use subagent when code work splits cleanly into bounded side tasks");
+		});
+
+		test("shows plan instructions only when plan mode is enabled", () => {
+			const withPlanMode = buildSystemPrompt({
+				selectedTools: ["edit", "write"],
+				planMode: true,
+				contextFiles: [],
+				skills: [],
+			});
+			const withoutPlanMode = buildSystemPrompt({
+				selectedTools: ["edit", "write"],
+				planMode: false,
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(withPlanMode).toContain("When plan mode is on");
+			expect(withPlanMode).toContain("milestone checklist items using [ ]/[~]/[x]/[!]");
+			expect(withoutPlanMode).not.toContain("When plan mode is on");
+		});
+
+		test("shows edit confirmation instructions only when edit mode is disabled", () => {
+			const withEditGate = buildSystemPrompt({
+				selectedTools: ["edit", "write", "confirm"],
+				editMode: false,
+				contextFiles: [],
+				skills: [],
+			});
+			const withoutEditGate = buildSystemPrompt({
+				selectedTools: ["edit", "write", "confirm"],
+				editMode: true,
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(withEditGate).toContain("Before editing any non-.plans files");
+			expect(withoutEditGate).not.toContain("Before editing any non-.plans files");
+		});
+
+		test("drops the old worker-per-milestone team mode wording", () => {
+			const prompt = buildSystemPrompt({
+				selectedTools: ["edit", "write"],
+				planMode: true,
+				editMode: false,
+				contextFiles: [],
+				skills: [],
+			});
+
+			expect(prompt).not.toContain("Execute each milestone using a worker subagent");
+			expect(prompt).not.toContain("worker-per-milestone");
 		});
 	});
 });

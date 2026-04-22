@@ -75,9 +75,9 @@ function buildSingleScoutPlan(prompt: string): SubagentSchedulePlan {
 		tasks: [{ role: "scout", task }],
 		reason: "single_scout",
 		note: [
-			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
+			"Optional: if you want to keep the main context cleaner, start with a scout subagent before direct file reads:",
 			JSON.stringify({ role: "scout", task }, null, 2),
-			"Worker roles must not be used in this call. Mutation comes after exploration is complete.",
+			"If the task stays small, continuing locally is fine. Keep worker roles for later execution only.",
 		].join("\n\n"),
 	};
 }
@@ -98,9 +98,9 @@ function buildParallelScoutPlan(prompt: string): SubagentSchedulePlan {
 		tasks,
 		reason: "parallel_scouts",
 		note: [
-			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
+			"This task is broad enough that parallel scout sidecars may keep the main context cleaner:",
 			JSON.stringify({ tasks }, null, 2),
-			"If the combined findings are still large, run one planner afterward. Worker roles must not be used in this call. Mutation comes after exploration is complete.",
+			"If the combined findings are still large, run one planner afterward. Keep worker roles for later execution only.",
 		].join("\n\n"),
 	};
 }
@@ -121,9 +121,9 @@ function buildScoutPlannerPlan(prompt: string): SubagentSchedulePlan {
 		tasks,
 		reason: "scout_then_planner",
 		note: [
-			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
+			"This task benefits from a scout then planner pass before implementation:",
 			JSON.stringify({ chain: tasks }, null, 2),
-			"After the planner returns, write its output as a plan to .plans/<YYYYMMDD-HHmmss>-<slug>.md in [ ]/[~]/[x]/[!] format before editing any files. Worker roles must not be used in this call. Mutation comes after exploration is complete.",
+			"Use the planner output to keep the next edits focused. Keep worker roles for later execution only.",
 		].join("\n\n"),
 	};
 }
@@ -135,11 +135,15 @@ function buildReviewerPlan(prompt: string): SubagentSchedulePlan {
 		tasks: [{ role: "reviewer", task }],
 		reason: "single_reviewer",
 		note: [
-			"STOP: Before reading any files, you MUST delegate this task using subagent. Direct file reads will bloat context. Use this call now:",
+			"Optional: start with a reviewer sidecar if you want a tighter read-only inspection before diving in:",
 			JSON.stringify({ role: "reviewer", task }, null, 2),
-			"Worker roles must not be used in this call. Mutation comes after exploration is complete.",
+			"Keep worker roles for later execution only.",
 		].join("\n\n"),
 	};
+}
+
+export function shouldAutoPlanForSchedulePlan(plan: SubagentSchedulePlan | undefined): boolean {
+	return plan?.mode === "parallel" || plan?.mode === "chain";
 }
 
 export function buildSubagentSchedulerPlan(input: SubagentSchedulerInput): SubagentSchedulePlan | undefined {

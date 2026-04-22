@@ -107,6 +107,34 @@ describe("SettingsManager", () => {
 			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
 			expect(savedSettings.defaultThinkingLevel).toBe("high");
 		});
+
+		it("should persist planMode and editMode while preserving unrelated settings", async () => {
+			const settingsPath = join(agentDir, "settings.json");
+			writeFileSync(
+				settingsPath,
+				JSON.stringify({
+					theme: "dark",
+					defaultModel: "claude-sonnet",
+				}),
+			);
+
+			const manager = SettingsManager.create(projectDir, agentDir);
+
+			const currentSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			currentSettings.enabledModels = ["claude-opus-4-5"];
+			writeFileSync(settingsPath, JSON.stringify(currentSettings, null, 2));
+
+			manager.setPlanMode(true);
+			manager.setEditMode(false);
+			await manager.flush();
+
+			const savedSettings = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			expect(savedSettings.planMode).toBe(true);
+			expect(savedSettings.editMode).toBe(false);
+			expect(savedSettings.theme).toBe("dark");
+			expect(savedSettings.defaultModel).toBe("claude-sonnet");
+			expect(savedSettings.enabledModels).toEqual(["claude-opus-4-5"]);
+		});
 	});
 
 	describe("packages migration", () => {

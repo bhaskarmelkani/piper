@@ -70,6 +70,12 @@ import {
 } from "./extensions/index.js";
 import type { BashExecutionMessage, CustomMessage } from "./messages.js";
 import type { ModelRegistry } from "./model-registry.js";
+import {
+	buildPlanningContextMessage,
+	createTurnPlanContext,
+	type TurnPlanContext,
+	type TurnPlanningMode,
+} from "./planning.js";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.js";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.js";
 import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.js";
@@ -77,10 +83,11 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
-import { buildSubagentSchedulerPlan } from "./subagents/scheduler.js";
+import { buildSubagentSchedulerPlan, shouldAutoPlanForSchedulePlan } from "./subagents/scheduler.js";
 import { buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
+import { resolveToCwd } from "./tools/path-utils.js";
 import { createToolDefinitionFromAgentTool, wrapToolDefinition } from "./tools/tool-definition-wrapper.js";
 
 // ============================================================================
@@ -267,7 +274,10 @@ export class AgentSession {
 	private _retryResolve: (() => void) | undefined = undefined;
 	private _turnMutationStarted = false;
 	private _turnExplorationCount = 0;
+	private _turnEditApprovalGranted = false;
 	private _explorationNudgeActive = false;
+	private _currentPlanningMode: TurnPlanningMode = "off";
+	private _currentTurnPlanContext: TurnPlanContext | undefined = undefined;
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -299,6 +309,7 @@ export class AgentSession {
 	private _toolDefinitions: Map<string, ToolDefinitionEntry> = new Map();
 	private _toolPromptSnippets: Map<string, string> = new Map();
 	private _toolPromptGuidelines: Map<string, string[]> = new Map();
+	private _configuredActiveToolNames: string[] = [];
 
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
@@ -314,6 +325,7 @@ export class AgentSession {
 		this._modelRegistry = config.modelRegistry;
 		this._extensionRunnerRef = config.extensionRunnerRef;
 		this._initialActiveToolNames = config.initialActiveToolNames;
+		this._configuredActiveToolNames = config.initialActiveToolNames ? [...config.initialActiveToolNames] : [];
 		this._baseToolsOverride = config.baseToolsOverride;
 		this._sessionStartEvent = config.sessionStartEvent ?? { type: "session_start", reason: "startup" };
 
@@ -331,6 +343,74 @@ export class AgentSession {
 	/** Model registry for API key resolution and model discovery */
 	get modelRegistry(): ModelRegistry {
 		return this._modelRegistry;
+	}
+
+	private _getRequiredToolNames(): string[] {
+		return this.settingsManager.getEditMode() ? [] : ["confirm"];
+	}
+
+	private _resolveRuntimeToolNames(toolNames: readonly string[]): string[] {
+		return [...new Set([...toolNames, ...this._getRequiredToolNames()])];
+	}
+
+	private _applyConfiguredTools(): void {
+		const runtimeToolNames = this._resolveRuntimeToolNames(this._configuredActiveToolNames);
+		const tools: AgentTool[] = [];
+		const validRuntimeToolNames: string[] = [];
+		const isSubagentChild = parseInt(process.env.PI_SUBAGENT_DEPTH ?? "0", 10) > 0;
+		for (const name of runtimeToolNames) {
+			if (isSubagentChild && name === "subagent") {
+				continue;
+			}
+			const tool = this._toolRegistry.get(name);
+			if (tool) {
+				tools.push(tool);
+				validRuntimeToolNames.push(name);
+			}
+		}
+		this.agent.state.tools = tools;
+		this._baseSystemPrompt = this._rebuildSystemPrompt(validRuntimeToolNames);
+		this.agent.state.systemPrompt = this._baseSystemPrompt;
+	}
+
+	private _getToolPath(args: unknown): string | undefined {
+		if (!args || typeof args !== "object" || !("path" in args)) {
+			return undefined;
+		}
+		return typeof args.path === "string" ? args.path : undefined;
+	}
+
+	private _isPlanningFilePath(filePath: string | undefined): boolean {
+		if (!filePath || !this._currentTurnPlanContext) {
+			return false;
+		}
+		const resolvedPath = resolveToCwd(filePath, this._cwd);
+		const plansRoot = resolve(this._cwd, ".plans");
+		return (
+			resolvedPath === plansRoot ||
+			resolvedPath.startsWith(`${plansRoot}/`) ||
+			resolvedPath.startsWith(`${plansRoot}\\`)
+		);
+	}
+
+	private _isRepoMutation(toolName: string, args: unknown): boolean {
+		if (toolName !== "edit" && toolName !== "write") {
+			return false;
+		}
+		return !this._isPlanningFilePath(this._getToolPath(args));
+	}
+
+	private _toolResultText(content: Array<{ type: string; text?: string }> | undefined): string {
+		if (!content) {
+			return "";
+		}
+		return content
+			.filter(
+				(part): part is { type: "text"; text: string } => part.type === "text" && typeof part.text === "string",
+			)
+			.map((part) => part.text)
+			.join("\n")
+			.trim();
 	}
 
 	private async _getRequiredRequestAuth(model: Model<any>): Promise<{
@@ -372,31 +452,42 @@ export class AgentSession {
 		const EXPLORATION_NUDGE_THRESHOLD = 5;
 
 		this.agent.beforeToolCall = async ({ toolCall, args }) => {
-			if (toolCall.name === "edit" || toolCall.name === "write") {
-				this._turnMutationStarted = true;
-			}
 			if (EXPLORATION_TOOLS.has(toolCall.name)) {
 				this._turnExplorationCount++;
 				if (this._turnExplorationCount >= EXPLORATION_NUDGE_THRESHOLD && !this._explorationNudgeActive) {
 					this._explorationNudgeActive = true;
-					this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-					this.agent.state.systemPrompt = this._baseSystemPrompt;
+					this.rebuildSystemPrompt();
 				}
+			}
+			const isRepoMutation = this._isRepoMutation(toolCall.name, args);
+			if (isRepoMutation && !this.settingsManager.getEditMode() && !this._turnEditApprovalGranted) {
+				return {
+					block: true,
+					reason:
+						"Edit mode is off. Use the confirm tool to ask for permission before editing files outside .plans.",
+				};
 			}
 			const runner = this._extensionRunner;
 			if (!runner?.hasHandlers("tool_call")) {
+				if (isRepoMutation) {
+					this._turnMutationStarted = true;
+				}
 				return undefined;
 			}
 
 			await this._agentEventQueue;
 
 			try {
-				return await runner.emitToolCall({
+				const hookResult = await runner.emitToolCall({
 					type: "tool_call",
 					toolName: toolCall.name,
 					toolCallId: toolCall.id,
 					input: args as Record<string, unknown>,
 				});
+				if (!hookResult?.block && isRepoMutation) {
+					this._turnMutationStarted = true;
+				}
+				return hookResult;
 			} catch (err) {
 				if (err instanceof Error) {
 					throw err;
@@ -407,7 +498,13 @@ export class AgentSession {
 
 		this.agent.afterToolCall = async ({ toolCall, args, result, isError }) => {
 			const runner = this._extensionRunner;
+			let finalContent = result.content;
+			let finalDetails = result.details;
+			let finalIsError = isError;
 			if (!runner?.hasHandlers("tool_result")) {
+				if (toolCall.name === "confirm" && !finalIsError && this._toolResultText(finalContent) === "confirmed") {
+					this._turnEditApprovalGranted = true;
+				}
 				return undefined;
 			}
 
@@ -422,13 +519,23 @@ export class AgentSession {
 			});
 
 			if (!hookResult) {
+				if (toolCall.name === "confirm" && !finalIsError && this._toolResultText(finalContent) === "confirmed") {
+					this._turnEditApprovalGranted = true;
+				}
 				return undefined;
 			}
 
+			finalContent = hookResult.content ?? result.content;
+			finalDetails = hookResult.details ?? result.details;
+			finalIsError = hookResult.isError ?? isError;
+			if (toolCall.name === "confirm" && !finalIsError && this._toolResultText(finalContent) === "confirmed") {
+				this._turnEditApprovalGranted = true;
+			}
+
 			return {
-				content: hookResult.content,
-				details: hookResult.details,
-				isError: hookResult.isError ?? isError,
+				content: finalContent,
+				details: finalDetails,
+				isError: finalIsError,
 			};
 		};
 	}
@@ -783,6 +890,14 @@ export class AgentSession {
 		return this.agent.state.tools.map((t) => t.name);
 	}
 
+	get planningModeStatus(): TurnPlanningMode {
+		return this.settingsManager.getPlanMode() ? "manual" : this._currentPlanningMode;
+	}
+
+	get editModeEnabled(): boolean {
+		return this.settingsManager.getEditMode();
+	}
+
 	/**
 	 * Get all configured tools with name, description, parameter schema, and source metadata.
 	 */
@@ -806,24 +921,14 @@ export class AgentSession {
 	 * Changes take effect on the next agent turn.
 	 */
 	setActiveToolsByName(toolNames: string[]): void {
-		const tools: AgentTool[] = [];
 		const validToolNames: string[] = [];
-		const isSubagentChild = parseInt(process.env.PI_SUBAGENT_DEPTH ?? "0", 10) > 0;
 		for (const name of toolNames) {
-			if (isSubagentChild && name === "subagent") {
-				continue;
-			}
-			const tool = this._toolRegistry.get(name);
-			if (tool) {
-				tools.push(tool);
+			if (this._toolRegistry.has(name)) {
 				validToolNames.push(name);
 			}
 		}
-		this.agent.state.tools = tools;
-
-		// Rebuild base system prompt with new tool set
-		this._baseSystemPrompt = this._rebuildSystemPrompt(validToolNames);
-		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		this._configuredActiveToolNames = [...new Set(validToolNames)];
+		this._applyConfiguredTools();
 	}
 
 	/** Whether compaction or branch summarization is currently running */
@@ -938,7 +1043,8 @@ export class AgentSession {
 			selectedTools: validToolNames,
 			toolSnippets,
 			promptGuidelines,
-			teamMode: this.settingsManager.getTeamMode(),
+			planMode: this.settingsManager.getPlanMode(),
+			editMode: this.settingsManager.getEditMode(),
 			explorationNudge: this._explorationNudgeActive,
 		});
 	}
@@ -1051,21 +1157,46 @@ export class AgentSession {
 			const mutationStarted = this._turnMutationStarted;
 			this._turnMutationStarted = false;
 			this._turnExplorationCount = 0;
+			this._turnEditApprovalGranted = false;
+			this._currentPlanningMode = "off";
+			this._currentTurnPlanContext = undefined;
 			if (this._explorationNudgeActive) {
 				this._explorationNudgeActive = false;
-				this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-				this.agent.state.systemPrompt = this._baseSystemPrompt;
+				this.rebuildSystemPrompt();
 			}
 
 			// Build messages array (scheduler/custom context first, then user message)
 			messages = [];
 
+			const activeToolNames = this.getActiveToolNames();
 			const schedulerPlan = buildSubagentSchedulerPlan({
 				cwd: this._cwd,
 				prompt: expandedText,
-				activeToolNames: this.getActiveToolNames(),
+				activeToolNames,
 				mutationStarted,
 			});
+			const planningMode: TurnPlanningMode = this.settingsManager.getPlanMode()
+				? "manual"
+				: shouldAutoPlanForSchedulePlan(schedulerPlan)
+					? "auto"
+					: "off";
+			this._currentPlanningMode = planningMode;
+			if (planningMode !== "off") {
+				this._currentTurnPlanContext = createTurnPlanContext(this._cwd, expandedText, planningMode);
+				messages.push({
+					role: "custom",
+					customType: "planning_context",
+					content: buildPlanningContextMessage(this._currentTurnPlanContext, this.settingsManager.getEditMode()),
+					display: false,
+					details: {
+						mode: planningMode,
+						path: this._currentTurnPlanContext.path,
+						template: this._currentTurnPlanContext.template,
+						editMode: this.settingsManager.getEditMode(),
+					},
+					timestamp: Date.now(),
+				});
+			}
 			if (schedulerPlan) {
 				messages.push({
 					role: "custom",
@@ -1416,8 +1547,7 @@ export class AgentSession {
 	}
 
 	rebuildSystemPrompt(): void {
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		this._applyConfiguredTools();
 	}
 
 	/**
@@ -2126,8 +2256,7 @@ export class AgentSession {
 		};
 
 		this._resourceLoader.extendResources(extensionPaths);
-		this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
-		this.agent.state.systemPrompt = this._baseSystemPrompt;
+		this.rebuildSystemPrompt();
 	}
 
 	private buildExtensionResourcePaths(entries: Array<{ path: string; extensionPath: string }>): Array<{
@@ -2292,7 +2421,7 @@ export class AgentSession {
 
 	private _refreshToolRegistry(options?: { activeToolNames?: string[]; includeAllExtensionTools?: boolean }): void {
 		const previousRegistryNames = new Set(this._toolRegistry.keys());
-		const previousActiveToolNames = this.getActiveToolNames();
+		const previousActiveToolNames = this._configuredActiveToolNames;
 
 		const registeredTools = this._extensionRunner?.getAllRegisteredTools() ?? [];
 		const allCustomTools = [

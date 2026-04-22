@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildSubagentSchedulerPlan } from "../src/core/subagents/scheduler.js";
+import { buildSubagentSchedulerPlan, shouldAutoPlanForSchedulePlan } from "../src/core/subagents/scheduler.js";
 import { createHarness, getUserTexts } from "./suite/harness.js";
 
 describe("subagent scheduler", () => {
@@ -15,6 +15,7 @@ describe("subagent scheduler", () => {
 		});
 
 		expect(plan?.mode).toBe("parallel");
+		expect(shouldAutoPlanForSchedulePlan(plan)).toBe(true);
 		expect(plan?.tasks).toHaveLength(2);
 		expect(plan?.tasks.every((task) => task.role === "scout")).toBe(true);
 	});
@@ -29,6 +30,7 @@ describe("subagent scheduler", () => {
 		});
 
 		expect(plan?.mode).toBe("chain");
+		expect(shouldAutoPlanForSchedulePlan(plan)).toBe(true);
 		expect(plan?.tasks.map((task) => task.role)).toEqual(["scout", "planner"]);
 		expect(plan?.note).toContain("{previous}");
 	});
@@ -42,6 +44,7 @@ describe("subagent scheduler", () => {
 		});
 
 		expect(plan).toBeUndefined();
+		expect(shouldAutoPlanForSchedulePlan(plan)).toBe(false);
 	});
 
 	it("never auto-spawns a worker", () => {
@@ -116,6 +119,15 @@ describe("subagent scheduler prompt injection", () => {
 					message.role === "custom" && message.customType === "subagent_scheduler" && message.display === false,
 			),
 		).toBe(true);
+		expect(
+			harness.session.messages.some(
+				(message) =>
+					message.role === "custom" &&
+					message.customType === "planning_context" &&
+					message.display === false &&
+					(message.details as { mode?: string } | undefined)?.mode === "auto",
+			),
+		).toBe(true);
 	});
 
 	it("does not inject a scheduler message for a simple direct task", async () => {
@@ -131,6 +143,11 @@ describe("subagent scheduler prompt injection", () => {
 		expect(
 			harness.session.messages.some(
 				(message) => message.role === "custom" && message.customType === "subagent_scheduler",
+			),
+		).toBe(false);
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "custom" && message.customType === "planning_context",
 			),
 		).toBe(false);
 	});
