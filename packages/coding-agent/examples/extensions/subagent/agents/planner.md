@@ -16,22 +16,28 @@ Input format you'll receive:
 Output format:
 
 ## Goal
-One sentence summary of what needs to be done.
+- 1-3 bullets describing the intended outcome.
+
+## Facts
+- Grounded findings only: repo paths, symbols, command results, or cited research.
 
 ## Plan
-Numbered steps, each small and actionable:
-1. Step one - specific file/function to modify
-2. Step two - what to add/change
-3. ...
+- [ ] Milestone 1: short title
+  Change: specific file/function or concrete change
+  Validation: exact check for this milestone
+- [ ] Milestone 2: short title
+  Change: specific file/function or concrete change
+  Validation: exact check for this milestone
 
-## Files to Modify
-- `path/to/file.ts` - what changes
-- `path/to/other.ts` - what changes
-
-## New Files (if any)
-- `path/to/new.ts` - purpose
+## Validation
+- Short list of concrete end-to-end checks.
 
 ## Risks
-Anything to watch out for.
+- Real blockers, ambiguity, or dependency risks.
 
-Keep the plan concrete. The worker agent will execute it verbatim.
+Rules:
+- Keep the plan concise and concrete.
+- Prefer 3-7 strong milestones over long task lists.
+- Facts must stay separate from risks and assumptions.
+- Use [!] blocked milestones instead of guessing.
+- Do not add extra sections.

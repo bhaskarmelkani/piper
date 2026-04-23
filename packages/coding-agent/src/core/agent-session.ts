@@ -238,6 +238,91 @@ const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "hi
 
 /** Thinking levels including xhigh (for supported models) */
 const THINKING_LEVELS_WITH_XHIGH: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
+const PLAN_MODE_DESTRUCTIVE_BASH_PATTERNS = [
+	/\brm\b/i,
+	/\brmdir\b/i,
+	/\bmv\b/i,
+	/\bcp\b/i,
+	/\bmkdir\b/i,
+	/\btouch\b/i,
+	/\bchmod\b/i,
+	/\bchown\b/i,
+	/\bchgrp\b/i,
+	/\bln\b/i,
+	/\btee\b/i,
+	/\btruncate\b/i,
+	/\bdd\b/i,
+	/\bshred\b/i,
+	/(^|[^<])>(?!>)/,
+	/>>/,
+	/\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
+	/\byarn\s+(add|remove|install|publish)/i,
+	/\bpnpm\s+(add|remove|install|publish)/i,
+	/\bbun\s+(add|remove|install|update)/i,
+	/\bpip\s+(install|uninstall)/i,
+	/\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
+	/\bbrew\s+(install|uninstall|upgrade)/i,
+	/\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
+	/\bsudo\b/i,
+	/\bsu\b/i,
+	/\bkill\b/i,
+	/\bpkill\b/i,
+	/\bkillall\b/i,
+	/\breboot\b/i,
+	/\bshutdown\b/i,
+	/\bsystemctl\s+(start|stop|restart|enable|disable)/i,
+	/\bservice\s+\S+\s+(start|stop|restart)/i,
+	/\b(vim?|nano|emacs|code|subl)\b/i,
+] as const;
+const PLAN_MODE_SAFE_BASH_PATTERNS = [
+	/^\s*cat\b/i,
+	/^\s*head\b/i,
+	/^\s*tail\b/i,
+	/^\s*less\b/i,
+	/^\s*more\b/i,
+	/^\s*grep\b/i,
+	/^\s*find\b/i,
+	/^\s*ls\b/i,
+	/^\s*pwd\b/i,
+	/^\s*echo\b/i,
+	/^\s*printf\b/i,
+	/^\s*wc\b/i,
+	/^\s*sort\b/i,
+	/^\s*uniq\b/i,
+	/^\s*diff\b/i,
+	/^\s*file\b/i,
+	/^\s*stat\b/i,
+	/^\s*du\b/i,
+	/^\s*df\b/i,
+	/^\s*tree\b/i,
+	/^\s*which\b/i,
+	/^\s*whereis\b/i,
+	/^\s*type\b/i,
+	/^\s*env\b/i,
+	/^\s*printenv\b/i,
+	/^\s*uname\b/i,
+	/^\s*whoami\b/i,
+	/^\s*id\b/i,
+	/^\s*date\b/i,
+	/^\s*ps\b/i,
+	/^\s*top\b/i,
+	/^\s*htop\b/i,
+	/^\s*free\b/i,
+	/^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)\b/i,
+	/^\s*git\s+ls-/i,
+	/^\s*node\s+--version\b/i,
+	/^\s*python\s+--version\b/i,
+	/^\s*bun\s+--version\b/i,
+	/^\s*curl\s/i,
+	/^\s*wget\s+-O\s*-/i,
+	/^\s*jq\b/i,
+	/^\s*sed\s+-n\b/i,
+	/^\s*awk\b/i,
+	/^\s*rg\b/i,
+	/^\s*fd\b/i,
+	/^\s*bat\b/i,
+	/^\s*eza\b/i,
+] as const;
 
 // ============================================================================
 // AgentSession Class
@@ -386,17 +471,36 @@ export class AgentSession {
 		return typeof args.path === "string" ? args.path : undefined;
 	}
 
+	private _normalizeAbsolutePath(path: string): string {
+		return resolve(path).replace(/\\/g, "/");
+	}
+
 	private _isPlanningFilePath(filePath: string | undefined): boolean {
 		if (!filePath || !this._currentTurnPlanContext) {
 			return false;
 		}
-		const resolvedPath = resolveToCwd(filePath, this._cwd);
-		const plansRoot = resolve(this._cwd, ".plans");
-		return (
-			resolvedPath === plansRoot ||
-			resolvedPath.startsWith(`${plansRoot}/`) ||
-			resolvedPath.startsWith(`${plansRoot}\\`)
-		);
+		const resolvedPath = this._normalizeAbsolutePath(resolveToCwd(filePath, this._cwd));
+		return resolvedPath === this._currentTurnPlanContext.path;
+	}
+
+	private _getBashCommand(args: unknown): string | undefined {
+		if (!args || typeof args !== "object" || !("command" in args)) {
+			return undefined;
+		}
+		return typeof args.command === "string" ? args.command : undefined;
+	}
+
+	private _isReadOnlyPlanningBashCommand(command: string | undefined): boolean {
+		if (!command) {
+			return false;
+		}
+		const isDestructive = PLAN_MODE_DESTRUCTIVE_BASH_PATTERNS.some((pattern) => pattern.test(command));
+		const isSafe = PLAN_MODE_SAFE_BASH_PATTERNS.some((pattern) => pattern.test(command));
+		return !isDestructive && isSafe;
+	}
+
+	private _buildPlanningCompletionText(): string {
+		return `Planning complete. Handoff written to ${this._currentTurnPlanContext?.path}. Disable plan mode to execute it.`;
 	}
 
 	private _isRepoMutation(toolName: string, args: unknown): boolean {
@@ -465,6 +569,21 @@ export class AgentSession {
 					this.rebuildSystemPrompt();
 				}
 			}
+			if (this._currentPlanningMode !== "off") {
+				if (this._isRepoMutation(toolCall.name, args)) {
+					return {
+						block: true,
+						reason: `Plan mode is on. Only update the current handoff file: ${this._currentTurnPlanContext?.path}`,
+					};
+				}
+				if (toolCall.name === "bash" && !this._isReadOnlyPlanningBashCommand(this._getBashCommand(args))) {
+					return {
+						block: true,
+						reason:
+							"Plan mode is on. Bash is limited to read-only exploration commands until you disable plan mode.",
+					};
+				}
+			}
 			const isRepoMutation = this._isRepoMutation(toolCall.name, args);
 			if (isRepoMutation && !this.settingsManager.getEditMode() && !this._turnEditApprovalGranted) {
 				return {
@@ -507,9 +626,21 @@ export class AgentSession {
 			let finalContent = result.content;
 			let finalDetails = result.details;
 			let finalIsError = isError;
+			const isPlanningWrite =
+				this._currentPlanningMode !== "off" &&
+				(toolCall.name === "write" || toolCall.name === "edit") &&
+				this._isPlanningFilePath(this._getToolPath(args));
 			if (!runner?.hasHandlers("tool_result")) {
 				if (toolCall.name === "confirm" && !finalIsError && this._toolResultText(finalContent) === "confirmed") {
 					this._turnEditApprovalGranted = true;
+				}
+				if (isPlanningWrite && !finalIsError) {
+					return {
+						content: [{ type: "text", text: this._buildPlanningCompletionText() }],
+						details: finalDetails,
+						isError: finalIsError,
+						terminate: true,
+					};
 				}
 				return undefined;
 			}
@@ -528,6 +659,14 @@ export class AgentSession {
 				if (toolCall.name === "confirm" && !finalIsError && this._toolResultText(finalContent) === "confirmed") {
 					this._turnEditApprovalGranted = true;
 				}
+				if (isPlanningWrite && !finalIsError) {
+					return {
+						content: [{ type: "text", text: this._buildPlanningCompletionText() }],
+						details: finalDetails,
+						isError: finalIsError,
+						terminate: true,
+					};
+				}
 				return undefined;
 			}
 
@@ -536,6 +675,14 @@ export class AgentSession {
 			finalIsError = hookResult.isError ?? isError;
 			if (toolCall.name === "confirm" && !finalIsError && this._toolResultText(finalContent) === "confirmed") {
 				this._turnEditApprovalGranted = true;
+			}
+			if (isPlanningWrite && !finalIsError) {
+				return {
+					content: [{ type: "text", text: this._buildPlanningCompletionText() }],
+					details: finalDetails,
+					isError: finalIsError,
+					terminate: true,
+				};
 			}
 
 			return {
@@ -1194,7 +1341,7 @@ export class AgentSession {
 				messages.push({
 					role: "custom",
 					customType: "planning_context",
-					content: buildPlanningContextMessage(this._currentTurnPlanContext, this.settingsManager.getEditMode()),
+					content: buildPlanningContextMessage(this._currentTurnPlanContext),
 					display: false,
 					details: {
 						mode: planningMode,

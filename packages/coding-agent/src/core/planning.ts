@@ -25,7 +25,7 @@ function buildPlanSlug(prompt: string): string {
 function buildPlanTitle(prompt: string): string {
 	const compact = prompt.replace(/\s+/g, " ").trim();
 	if (!compact) {
-		return "Execution Plan";
+		return "Planning Handoff";
 	}
 	return compact.length <= 72 ? compact : `${compact.slice(0, 69).trimEnd()}...`;
 }
@@ -33,27 +33,26 @@ function buildPlanTitle(prompt: string): string {
 export function buildPlanTemplate(prompt: string): string {
 	return `# ${buildPlanTitle(prompt)}
 
-## Summary
-- Intent: ${prompt.trim()}
-- Outcome: <what should be true when this work is done>
+## Goal
+- Request: ${prompt.trim()}
+- Outcome: <what should be true when execution is finished>
 
-## Success Criteria
-- [ ] <observable outcome 1>
-- [ ] <observable outcome 2>
+## Facts
+- <repo finding, command output, or cited research that matters>
 
-## Constraints / Notes
-- <repo rules, assumptions, known risks, or things to avoid>
-
-## Affected Areas
-- <files, packages, commands, or flows likely to change>
-
-## Milestones
+## Plan
 - [ ] Milestone 1: <short title>
-  Change: <what will change in this milestone>
-  Validation: <how this milestone will be checked>
+  Change: <specific edit or investigation>
+  Validation: <exact check for this milestone>
 - [ ] Milestone 2: <short title>
-  Change: <what will change in this milestone>
-  Validation: <how this milestone will be checked>
+  Change: <specific edit or investigation>
+  Validation: <exact check for this milestone>
+
+## Validation
+- <repo-wide check, targeted test, or manual smoke step>
+
+## Risks
+- <real blocker, ambiguity, or dependency risk>
 `;
 }
 
@@ -71,13 +70,15 @@ export function createTurnPlanContext(
 	};
 }
 
-export function buildPlanningContextMessage(plan: TurnPlanContext, editMode: boolean): string {
+export function buildPlanningContextMessage(plan: TurnPlanContext): string {
 	return [
 		`Planning is active for this turn (${plan.mode}).`,
-		`Before editing any non-.plans files, write or update this exact plan file: ${plan.path}`,
+		`Do read-only exploration first, then write or update this exact plan file: ${plan.path}`,
 		"Do not ask the user for permission to create or update the plan file.",
-		"Fill the template with specific details from the current task instead of leaving placeholders behind.",
-		`After the plan exists, continue execution in the same turn. Repo edits currently require confirmation: ${editMode ? "no" : "yes"}.`,
+		"Do not edit any non-.plans files or run mutating bash commands while planning is active.",
+		"Keep the final plan concise, grounded in facts, and free of placeholder text.",
+		"Use [!] blocked milestones instead of guessing when requirements are unclear.",
+		"After the plan file is complete, stop. Execution should continue later with plan mode off.",
 		"",
 		"Use this plan template:",
 		plan.template,

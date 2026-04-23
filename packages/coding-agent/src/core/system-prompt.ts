@@ -178,10 +178,14 @@ export function buildSystemPrompt(options: BuildSystemPromptOptions): string {
 	}
 	if (planMode && hasWrite) {
 		addGuideline(
-			"When plan mode is on: create or update the provided .plans file before editing repo files, do not ask permission to write that plan file, and continue execution after the plan is written",
+			"When plan mode is on: do read-only exploration first, then create or update only the provided .plans file, do not ask permission to write that plan file, and stop after the plan is written",
 		);
 		addGuideline(
-			"The plan must include: title, summary, success criteria, constraints or notes, affected areas, and milestone checklist items using [ ]/[~]/[x]/[!] markers. Each milestone must state both the change and its validation",
+			"The plan must contain exactly these sections: Goal, Facts, Plan, Validation, Risks. Facts must be grounded in repo findings or cited research, and the Plan section must use milestone checklist items with [ ]/[~]/[x]/[!] markers plus Change and Validation lines for each milestone",
+		);
+		addGuideline("While planning is active, do not edit non-.plans files and do not use mutating bash commands");
+		addGuideline(
+			"If the task is underspecified, record the uncertainty in Risks or mark the milestone [!] instead of guessing",
 		);
 	}
 	if (hasBash && !hasSearchCode && !hasGrep && !hasFind && !hasLs) {

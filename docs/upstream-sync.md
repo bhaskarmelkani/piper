@@ -14,6 +14,8 @@ Before resolving conflicts, open `plans/HISTORY.md` to find the relevant plan tr
 
 - `packages/coding-agent/src/modes/interactive/`
   The shell layout, sidebar behavior, prompt ergonomics, scrolling, and branding live here.
+- `packages/coding-agent/src/core/planning.ts`, `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/system-prompt.ts`
+  Plan-mode behavior, `.plans` handoff structure, and plan-only mutation gating live here. Preserve piper's handoff-first semantics unless a plan record explicitly changes them.
 - `packages/tui/src/`
   Only carry generic rendering primitives and stability fixes here. Do not move piper product behavior into `packages/tui`.
 - `packages/coding-agent/src/bun/`, `pi-test.sh`, root/package workflow files

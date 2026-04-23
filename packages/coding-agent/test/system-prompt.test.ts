@@ -138,7 +138,9 @@ describe("buildSystemPrompt", () => {
 			});
 
 			expect(withPlanMode).toContain("When plan mode is on");
-			expect(withPlanMode).toContain("milestone checklist items using [ ]/[~]/[x]/[!]");
+			expect(withPlanMode).toContain("stop after the plan is written");
+			expect(withPlanMode).toContain("Goal, Facts, Plan, Validation, Risks");
+			expect(withPlanMode).toContain("do not use mutating bash commands");
 			expect(withoutPlanMode).not.toContain("When plan mode is on");
 		});
 

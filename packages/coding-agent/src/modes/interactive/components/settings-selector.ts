@@ -173,7 +173,7 @@ export class SettingsSelectorComponent extends Container {
 			{
 				id: "plan-mode",
 				label: "Plan mode",
-				description: "Always create or update a .plans file before repo edits",
+				description: "Write one .plans handoff file and stop before repo edits",
 				currentValue: config.planMode ? "true" : "false",
 				values: ["true", "false"],
 			},
