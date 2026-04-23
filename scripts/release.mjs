@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Release script for pi-mono
+ * Release script for piper-mono
  *
  * Usage:
  *   bun scripts/release.mjs <major|minor|patch>
@@ -45,6 +45,15 @@ function run(cmd, options = {}) {
 function getVersion() {
 	const pkg = JSON.parse(readFileSync("packages/ai/package.json", "utf-8"));
 	return pkg.version;
+}
+
+function getCurrentBranch() {
+	const branch = run("git branch --show-current", { silent: true })?.trim();
+	if (!branch) {
+		console.error("Error: unable to determine current branch (detached HEAD is not supported for releases).");
+		process.exit(1);
+	}
+	return branch;
 }
 
 function compareVersions(a, b) {
@@ -155,6 +164,7 @@ console.log("  Working directory clean\n");
 
 // 2. Bump or set version
 const version = bumpOrSetVersion(RELEASE_TARGET);
+const currentBranch = getCurrentBranch();
 console.log(`  New version: ${version}\n`);
 
 // 3. Update changelogs
@@ -171,7 +181,7 @@ console.log();
 
 // 5. Publish
 console.log("Publishing to npm...");
-run("bun run publish");
+run("bun run publish:piper");
 console.log();
 
 // 6. Add new [Unreleased] sections
@@ -187,7 +197,7 @@ console.log();
 
 // 8. Push
 console.log("Pushing to remote...");
-run("git push origin main");
+run(`git push origin ${shellQuote(currentBranch)}`);
 run(`git push origin v${version}`);
 console.log();
 

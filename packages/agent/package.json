@@ -17,8 +17,8 @@
 		"prepublishOnly": "bun run clean && bun run build"
 	},
 	"dependencies": {
-		"@mariozechner/pi-ai": "^0.1.0",
-		"@sinclair/typebox": "^0.34.41"
+		"@mariozechner/pi-ai": "^0.4.0",
+		"typebox": "^1.1.24"
 	},
 	"keywords": [
 		"ai",

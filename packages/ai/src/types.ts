@@ -37,6 +37,7 @@ export type KnownProvider =
 	| "minimax"
 	| "minimax-cn"
 	| "huggingface"
+	| "fireworks"
 	| "opencode"
 	| "opencode-go"
 	| "kimi-coding";
@@ -222,7 +223,7 @@ export interface ToolResultMessage<TDetails = any> {
 
 export type Message = UserMessage | AssistantMessage | ToolResultMessage;
 
-import type { TSchema } from "@sinclair/typebox";
+import type { TSchema } from "typebox";
 
 export interface Tool<TParameters extends TSchema = TSchema> {
 	name: string;
@@ -291,6 +292,10 @@ export interface OpenAICompletionsCompat {
 	zaiToolStream?: boolean;
 	/** Whether the provider supports the `strict` field in tool definitions. Default: true. */
 	supportsStrictMode?: boolean;
+	/** Cache control convention for prompt caching. "anthropic" applies Anthropic-style `cache_control` markers to the system prompt, last tool definition, and last user/assistant text content. */
+	cacheControlFormat?: "anthropic";
+	/** Whether to send known session-affinity headers (`session_id`, `x-client-request-id`, `x-session-affinity`) from `options.sessionId` when caching is enabled. Default: false. */
+	sendSessionAffinityHeaders?: boolean;
 }
 
 /** Compatibility settings for OpenAI Responses APIs. */

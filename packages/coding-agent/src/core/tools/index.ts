@@ -12,8 +12,6 @@ export {
 	type BashToolDetails,
 	type BashToolInput,
 	type BashToolOptions,
-	bashTool,
-	bashToolDefinition,
 	createBashTool,
 	createBashToolDefinition,
 	createLocalBashOperations,
@@ -32,8 +30,6 @@ export {
 	type EditToolDetails,
 	type EditToolInput,
 	type EditToolOptions,
-	editTool,
-	editToolDefinition,
 } from "./edit.js";
 export { withFileMutationQueue } from "./file-mutation-queue.js";
 export {
@@ -43,8 +39,6 @@ export {
 	type FindToolDetails,
 	type FindToolInput,
 	type FindToolOptions,
-	findTool,
-	findToolDefinition,
 } from "./find.js";
 export {
 	createGrepTool,
@@ -53,8 +47,6 @@ export {
 	type GrepToolDetails,
 	type GrepToolInput,
 	type GrepToolOptions,
-	grepTool,
-	grepToolDefinition,
 } from "./grep.js";
 export {
 	createLsTool,
@@ -63,8 +55,6 @@ export {
 	type LsToolDetails,
 	type LsToolInput,
 	type LsToolOptions,
-	lsTool,
-	lsToolDefinition,
 } from "./ls.js";
 export {
 	createReadTool,
@@ -73,8 +63,6 @@ export {
 	type ReadToolDetails,
 	type ReadToolInput,
 	type ReadToolOptions,
-	readTool,
-	readToolDefinition,
 } from "./read.js";
 export {
 	createSearchCodeTool,
@@ -121,32 +109,18 @@ export {
 	type WriteOperations,
 	type WriteToolInput,
 	type WriteToolOptions,
-	writeTool,
-	writeToolDefinition,
 } from "./write.js";
 
 import type { AgentTool } from "@mariozechner/pi-agent-core";
 import type { ToolDefinition } from "../extensions/types.js";
 import { askTool, askToolDefinition, createAskTool, createAskToolDefinition } from "./ask.js";
-import {
-	type BashToolOptions,
-	bashTool,
-	bashToolDefinition,
-	createBashTool,
-	createBashToolDefinition,
-} from "./bash.js";
+import { type BashToolOptions, createBashTool, createBashToolDefinition } from "./bash.js";
 import { confirmTool, confirmToolDefinition, createConfirmTool, createConfirmToolDefinition } from "./confirm.js";
-import { createEditTool, createEditToolDefinition, editTool, editToolDefinition } from "./edit.js";
-import { createFindTool, createFindToolDefinition, findTool, findToolDefinition } from "./find.js";
-import { createGrepTool, createGrepToolDefinition, grepTool, grepToolDefinition } from "./grep.js";
-import { createLsTool, createLsToolDefinition, lsTool, lsToolDefinition } from "./ls.js";
-import {
-	createReadTool,
-	createReadToolDefinition,
-	type ReadToolOptions,
-	readTool,
-	readToolDefinition,
-} from "./read.js";
+import { createEditTool, createEditToolDefinition, type EditToolOptions } from "./edit.js";
+import { createFindTool, createFindToolDefinition, type FindToolOptions } from "./find.js";
+import { createGrepTool, createGrepToolDefinition, type GrepToolOptions } from "./grep.js";
+import { createLsTool, createLsToolDefinition, type LsToolOptions } from "./ls.js";
+import { createReadTool, createReadToolDefinition, type ReadToolOptions } from "./read.js";
 import {
 	createSearchCodeTool,
 	createSearchCodeToolDefinition,
@@ -160,10 +134,24 @@ import {
 	symbolsOverviewTool,
 	symbolsOverviewToolDefinition,
 } from "./symbols-overview.js";
-import { createWriteTool, createWriteToolDefinition, writeTool, writeToolDefinition } from "./write.js";
-
+import { createWriteTool, createWriteToolDefinition, type WriteToolOptions } from "./write.js";
 export type Tool = AgentTool<any>;
 export type ToolDef = ToolDefinition<any, any>;
+
+export const readToolDefinition = createReadToolDefinition(process.cwd());
+export const readTool = createReadTool(process.cwd());
+export const bashToolDefinition = createBashToolDefinition(process.cwd());
+export const bashTool = createBashTool(process.cwd());
+export const editToolDefinition = createEditToolDefinition(process.cwd());
+export const editTool = createEditTool(process.cwd());
+export const writeToolDefinition = createWriteToolDefinition(process.cwd());
+export const writeTool = createWriteTool(process.cwd());
+export const grepToolDefinition = createGrepToolDefinition(process.cwd());
+export const grepTool = createGrepTool(process.cwd());
+export const findToolDefinition = createFindToolDefinition(process.cwd());
+export const findTool = createFindTool(process.cwd());
+export const lsToolDefinition = createLsToolDefinition(process.cwd());
+export const lsTool = createLsTool(process.cwd());
 
 export const codingTools: Tool[] = [
 	readTool,
@@ -173,8 +161,6 @@ export const codingTools: Tool[] = [
 	searchCodeTool,
 	symbolsOverviewTool,
 	subagentTool,
-	confirmTool,
-	askTool,
 ];
 export const readOnlyTools: Tool[] = [readTool, grepTool, findTool, lsTool];
 
@@ -209,33 +195,99 @@ export const allToolDefinitions = {
 };
 
 export type ToolName = keyof typeof allTools;
+export const allToolNames: Set<ToolName> = new Set(Object.keys(allTools) as ToolName[]);
 
 export interface ToolsOptions {
 	read?: ReadToolOptions;
 	bash?: BashToolOptions;
 	subagent?: { fastModelId?: string };
+	write?: WriteToolOptions;
+	edit?: EditToolOptions;
+	grep?: GrepToolOptions;
+	find?: FindToolOptions;
+	ls?: LsToolOptions;
+}
+
+export function createToolDefinition(toolName: ToolName, cwd: string, options?: ToolsOptions): ToolDef {
+	switch (toolName) {
+		case "read":
+			return createReadToolDefinition(cwd, options?.read);
+		case "bash":
+			return createBashToolDefinition(cwd, options?.bash);
+		case "edit":
+			return createEditToolDefinition(cwd, options?.edit);
+		case "write":
+			return createWriteToolDefinition(cwd, options?.write);
+		case "search_code":
+			return createSearchCodeToolDefinition(cwd);
+		case "symbols_overview":
+			return createSymbolsOverviewToolDefinition(cwd);
+		case "subagent":
+			return createSubagentToolDefinition(cwd, options?.subagent);
+		case "confirm":
+			return createConfirmToolDefinition();
+		case "ask":
+			return createAskToolDefinition();
+		case "grep":
+			return createGrepToolDefinition(cwd, options?.grep);
+		case "find":
+			return createFindToolDefinition(cwd, options?.find);
+		case "ls":
+			return createLsToolDefinition(cwd, options?.ls);
+		default:
+			throw new Error(`Unknown tool name: ${toolName}`);
+	}
+}
+
+export function createTool(toolName: ToolName, cwd: string, options?: ToolsOptions): Tool {
+	switch (toolName) {
+		case "read":
+			return createReadTool(cwd, options?.read);
+		case "bash":
+			return createBashTool(cwd, options?.bash);
+		case "edit":
+			return createEditTool(cwd, options?.edit);
+		case "write":
+			return createWriteTool(cwd, options?.write);
+		case "search_code":
+			return createSearchCodeTool(cwd);
+		case "symbols_overview":
+			return createSymbolsOverviewTool(cwd);
+		case "subagent":
+			return createSubagentTool(cwd);
+		case "confirm":
+			return createConfirmTool();
+		case "ask":
+			return createAskTool();
+		case "grep":
+			return createGrepTool(cwd, options?.grep);
+		case "find":
+			return createFindTool(cwd, options?.find);
+		case "ls":
+			return createLsTool(cwd, options?.ls);
+		default:
+			throw new Error(`Unknown tool name: ${toolName}`);
+	}
 }
 
 export function createCodingToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
 		createBashToolDefinition(cwd, options?.bash),
-		createEditToolDefinition(cwd),
-		createWriteToolDefinition(cwd),
+		createEditToolDefinition(cwd, options?.edit),
+		createWriteToolDefinition(cwd, options?.write),
 		createSearchCodeToolDefinition(cwd),
 		createSymbolsOverviewToolDefinition(cwd),
 		createSubagentToolDefinition(cwd, options?.subagent),
-		createConfirmToolDefinition(),
-		createAskToolDefinition(),
 	];
 }
 
 export function createReadOnlyToolDefinitions(cwd: string, options?: ToolsOptions): ToolDef[] {
 	return [
 		createReadToolDefinition(cwd, options?.read),
-		createGrepToolDefinition(cwd),
-		createFindToolDefinition(cwd),
-		createLsToolDefinition(cwd),
+		createGrepToolDefinition(cwd, options?.grep),
+		createFindToolDefinition(cwd, options?.find),
+		createLsToolDefinition(cwd, options?.ls),
 	];
 }
 
@@ -243,16 +295,16 @@ export function createAllToolDefinitions(cwd: string, options?: ToolsOptions): R
 	return {
 		read: createReadToolDefinition(cwd, options?.read),
 		bash: createBashToolDefinition(cwd, options?.bash),
-		edit: createEditToolDefinition(cwd),
-		write: createWriteToolDefinition(cwd),
+		edit: createEditToolDefinition(cwd, options?.edit),
+		write: createWriteToolDefinition(cwd, options?.write),
 		search_code: createSearchCodeToolDefinition(cwd),
 		symbols_overview: createSymbolsOverviewToolDefinition(cwd),
 		subagent: createSubagentToolDefinition(cwd, options?.subagent),
 		confirm: createConfirmToolDefinition(),
 		ask: createAskToolDefinition(),
-		grep: createGrepToolDefinition(cwd),
-		find: createFindToolDefinition(cwd),
-		ls: createLsToolDefinition(cwd),
+		grep: createGrepToolDefinition(cwd, options?.grep),
+		find: createFindToolDefinition(cwd, options?.find),
+		ls: createLsToolDefinition(cwd, options?.ls),
 	};
 }
 
@@ -260,33 +312,36 @@ export function createCodingTools(cwd: string, options?: ToolsOptions): Tool[] {
 	return [
 		createReadTool(cwd, options?.read),
 		createBashTool(cwd, options?.bash),
-		createEditTool(cwd),
-		createWriteTool(cwd),
+		createEditTool(cwd, options?.edit),
+		createWriteTool(cwd, options?.write),
 		createSearchCodeTool(cwd),
 		createSymbolsOverviewTool(cwd),
 		createSubagentTool(cwd),
-		createConfirmTool(),
-		createAskTool(),
 	];
 }
 
 export function createReadOnlyTools(cwd: string, options?: ToolsOptions): Tool[] {
-	return [createReadTool(cwd, options?.read), createGrepTool(cwd), createFindTool(cwd), createLsTool(cwd)];
+	return [
+		createReadTool(cwd, options?.read),
+		createGrepTool(cwd, options?.grep),
+		createFindTool(cwd, options?.find),
+		createLsTool(cwd, options?.ls),
+	];
 }
 
 export function createAllTools(cwd: string, options?: ToolsOptions): Record<ToolName, Tool> {
 	return {
 		read: createReadTool(cwd, options?.read),
 		bash: createBashTool(cwd, options?.bash),
-		edit: createEditTool(cwd),
-		write: createWriteTool(cwd),
+		edit: createEditTool(cwd, options?.edit),
+		write: createWriteTool(cwd, options?.write),
 		search_code: createSearchCodeTool(cwd),
 		symbols_overview: createSymbolsOverviewTool(cwd),
 		subagent: createSubagentTool(cwd),
 		confirm: createConfirmTool(),
 		ask: createAskTool(),
-		grep: createGrepTool(cwd),
-		find: createFindTool(cwd),
-		ls: createLsTool(cwd),
+		grep: createGrepTool(cwd, options?.grep),
+		find: createFindTool(cwd, options?.find),
+		ls: createLsTool(cwd, options?.ls),
 	};
 }

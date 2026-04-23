@@ -458,7 +458,10 @@ describe("interactive shell routing", () => {
 		const setSidebarSectionsForKey = vi.fn();
 		const fakeThis: any = {
 			options: { verbose: false },
-			settingsManager: { getQuietStartup: () => true },
+			settingsManager: {
+				getQuietStartup: () => true,
+				getDisabledSkills: () => [],
+			},
 			toolOutputExpanded: false,
 			chatContainer: new Container(),
 			sidebarComponent: {

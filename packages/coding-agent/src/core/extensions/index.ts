@@ -29,6 +29,7 @@ export type {
 	AppendEntryHandler,
 	// App keybindings (for custom editors)
 	AppKeybinding,
+	AutocompleteProviderFactory,
 	// Events - Tool (ToolCallEvent types)
 	BashToolCallEvent,
 	BashToolResultEvent,
@@ -36,6 +37,7 @@ export type {
 	BeforeAgentStartEventResult,
 	BeforeProviderRequestEvent,
 	BeforeProviderRequestEventResult,
+	BuildSystemPromptOptions,
 	// Context
 	CompactOptions,
 	// Events - Agent
@@ -104,6 +106,7 @@ export type {
 	// Commands
 	RegisteredCommand,
 	RegisteredTool,
+	ReplacedSessionContext,
 	ResolvedCommand,
 	// Events - Resources
 	ResourcesDiscoverEvent,
@@ -151,6 +154,7 @@ export type {
 	UserBashEvent,
 	UserBashEventResult,
 	WidgetPlacement,
+	WorkingIndicatorOptions,
 	WriteToolCallEvent,
 	WriteToolResultEvent,
 } from "./types.js";

@@ -3,42 +3,101 @@
  * Publish piper-ai to npm.
  *
  * The workspace package name must stay @mariozechner/pi-coding-agent for internal
- * resolution (extensions and jiti depend on it). This script temporarily renames
- * it to piper-ai for the publish, then restores it.
+ * resolution (extensions and jiti depend on it). This script stages a temporary
+ * package, renames it to piper-ai, and bundles the pi engine packages into the
+ * tarball so public installs do not depend on unpublished @mariozechner/* versions.
  *
  * Usage: bun scripts/publish-piper.mjs [--dry-run]
  */
 import { execSync } from "child_process";
-import { readFileSync, writeFileSync } from "fs";
-import { resolve } from "path";
+import { cpSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "fs";
+import { tmpdir } from "os";
+import { basename, join, resolve } from "path";
 
 const DRY_RUN = process.argv.includes("--dry-run");
-const PKG_PATH = resolve(import.meta.dirname, "../packages/coding-agent/package.json");
+const REPO_ROOT = resolve(import.meta.dirname, "..");
+const CODING_AGENT_DIR = resolve(REPO_ROOT, "packages/coding-agent");
+const INTERNAL_PACKAGES = [
+	{ name: "@mariozechner/pi-ai", dir: resolve(REPO_ROOT, "packages/ai") },
+	{ name: "@mariozechner/pi-agent-core", dir: resolve(REPO_ROOT, "packages/agent") },
+	{ name: "@mariozechner/pi-tui", dir: resolve(REPO_ROOT, "packages/tui") },
+];
+const CODING_AGENT_STAGE_PATHS = ["dist", "docs", "examples", "CHANGELOG.md", "README.md"];
+const INTERNAL_STAGE_PATHS = ["dist", "README.md"];
 
-const original = readFileSync(PKG_PATH, "utf8");
-const pkg = JSON.parse(original);
-
-if (pkg.name === "piper-ai") {
-	console.error("package.json already has name=piper-ai — previous publish may have crashed. Restore it first.");
-	process.exit(1);
+function readJson(path) {
+	return JSON.parse(readFileSync(path, "utf8"));
 }
 
-const modified = { ...pkg, name: "piper-ai" };
-delete modified._name;
+function writeJson(path, value) {
+	writeFileSync(path, JSON.stringify(value, null, "\t") + "\n");
+}
 
+function copyIfExists(sourcePath, targetPath) {
+	if (!existsSync(sourcePath)) {
+		return;
+	}
+	cpSync(sourcePath, targetPath, { recursive: true });
+}
+
+function packageDirFromName(name) {
+	const segments = name.split("/");
+	return join(...segments);
+}
+
+function stagePackageArtifacts(sourceDir, targetDir, paths) {
+	mkdirSync(targetDir, { recursive: true });
+	for (const relativePath of paths) {
+		copyIfExists(join(sourceDir, relativePath), join(targetDir, basename(relativePath)));
+	}
+}
+
+function rewriteBundledDependencies(dependencies, version) {
+	if (!dependencies) {
+		return dependencies;
+	}
+	return Object.fromEntries(
+		Object.entries(dependencies).map(([name, value]) =>
+			INTERNAL_PACKAGES.some((pkg) => pkg.name === name) ? [name, version] : [name, value],
+		),
+	);
+}
+
+const pkg = readJson(join(CODING_AGENT_DIR, "package.json"));
+const stageDir = mkdtempSync(join(tmpdir(), "piper-publish-"));
 try {
+	stagePackageArtifacts(CODING_AGENT_DIR, stageDir, CODING_AGENT_STAGE_PATHS);
+	const stagedScripts = { ...pkg.scripts };
+	delete stagedScripts.prepublishOnly;
+
+	const stagedPkg = {
+		...pkg,
+		name: "piper-ai",
+		dependencies: rewriteBundledDependencies(pkg.dependencies, pkg.version),
+		bundledDependencies: INTERNAL_PACKAGES.map((dependency) => dependency.name),
+		scripts: stagedScripts,
+	};
+	delete stagedPkg._name;
+	writeJson(join(stageDir, "package.json"), stagedPkg);
+
+	const stageNodeModulesDir = join(stageDir, "node_modules");
+	for (const dependency of INTERNAL_PACKAGES) {
+		const dependencyPkg = readJson(join(dependency.dir, "package.json"));
+		const stagedDependencyPkg = {
+			...dependencyPkg,
+			dependencies: rewriteBundledDependencies(dependencyPkg.dependencies, pkg.version),
+		};
+		const dependencyStageDir = join(stageNodeModulesDir, packageDirFromName(dependency.name));
+		stagePackageArtifacts(dependency.dir, dependencyStageDir, INTERNAL_STAGE_PATHS);
+		writeJson(join(dependencyStageDir, "package.json"), stagedDependencyPkg);
+	}
+
 	console.log(`Publishing piper-ai@${pkg.version}${DRY_RUN ? " (dry run)" : ""}...`);
-	writeFileSync(PKG_PATH, JSON.stringify(modified, null, "\t") + "\n");
+	const cmd = DRY_RUN ? "npm pack --dry-run" : "npm publish --access public";
 
-	const cmd = [
-		"bun publish --access public",
-		DRY_RUN ? "--dry-run" : "",
-	].filter(Boolean).join(" ");
-
-	execSync(cmd, { cwd: resolve(import.meta.dirname, "../packages/coding-agent"), stdio: "inherit" });
+	execSync(cmd, { cwd: stageDir, stdio: "inherit" });
 
 	console.log("\nPublished successfully.");
 } finally {
-	writeFileSync(PKG_PATH, original);
-	console.log("Restored package.json.");
+	rmSync(stageDir, { recursive: true, force: true });
 }

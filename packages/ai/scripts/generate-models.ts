@@ -3,7 +3,7 @@
 import { writeFileSync } from "fs";
 import { join, dirname } from "path";
 import { fileURLToPath } from "url";
-import { Api, KnownProvider, Model } from "../src/types.js";
+import { Api, KnownProvider, Model, type OpenAICompletionsCompat } from "../src/types.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -83,6 +83,12 @@ const COPILOT_MULTIPLIERS: Record<string, number> = {
 const AI_GATEWAY_MODELS_URL = "https://ai-gateway.vercel.sh/v1";
 const AI_GATEWAY_BASE_URL = "https://ai-gateway.vercel.sh";
 const ZAI_TOOL_STREAM_UNSUPPORTED_MODELS = new Set(["glm-4.5", "glm-4.5-air", "glm-4.5-flash", "glm-4.5v"]);
+
+function getBedrockBaseUrl(modelId: string): string {
+	return modelId.startsWith("eu.")
+		? "https://bedrock-runtime.eu-central-1.amazonaws.com"
+		: "https://bedrock-runtime.us-east-1.amazonaws.com";
+}
 
 async function fetchOpenRouterModels(): Promise<Model<any>[]> {
 	try {
@@ -231,7 +237,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 					name: m.name || id,
 					api: "bedrock-converse-stream" as const,
 					provider: "amazon-bedrock" as const,
-					baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+					baseUrl: getBedrockBaseUrl(id),
 					reasoning: m.reasoning === true,
 					input: (m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"]) as ("text" | "image")[],
 					cost: {
@@ -489,6 +495,33 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 			}
 		}
 
+		// Process Fireworks models
+		if (data["fireworks-ai"]?.models) {
+			for (const [modelId, model] of Object.entries(data["fireworks-ai"].models)) {
+				const m = model as ModelsDevModel;
+				if (m.tool_call !== true) continue;
+
+				models.push({
+					id: modelId,
+					name: m.name || modelId,
+					api: "anthropic-messages",
+					provider: "fireworks",
+					// Fireworks Anthropic-compatible API - SDK appends /v1/messages
+					baseUrl: "https://api.fireworks.ai/inference",
+					reasoning: m.reasoning === true,
+					input: m.modalities?.input?.includes("image") ? ["text", "image"] : ["text"],
+					cost: {
+						input: m.cost?.input || 0,
+						output: m.cost?.output || 0,
+						cacheRead: m.cost?.cache_read || 0,
+						cacheWrite: m.cost?.cache_write || 0,
+					},
+					contextWindow: m.limit?.context || 4096,
+					maxTokens: m.limit?.output || 4096,
+				});
+			}
+		}
+
 		// Process OpenCode models (Zen and Go)
 		// API mapping based on provider.npm field:
 		// - @ai-sdk/openai → openai-responses
@@ -511,6 +544,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				const npm = m.provider?.npm;
 				let api: Api;
 				let baseUrl: string;
+				let compat: OpenAICompletionsCompat | undefined;
 
 				if (npm === "@ai-sdk/openai") {
 					api = "openai-responses";
@@ -522,6 +556,10 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 				} else if (npm === "@ai-sdk/google") {
 					api = "google-generative-ai";
 					baseUrl = `${variant.basePath}/v1`;
+				} else if (npm === "@ai-sdk/alibaba") {
+					api = "openai-completions";
+					baseUrl = `${variant.basePath}/v1`;
+					compat = { cacheControlFormat: "anthropic" };
 				} else {
 					// null, undefined, or @ai-sdk/openai-compatible
 					api = "openai-completions";
@@ -542,6 +580,7 @@ async function loadModelsDevData(): Promise<Model<any>[]> {
 						cacheRead: m.cost?.cache_read || 0,
 						cacheWrite: m.cost?.cache_write || 0,
 					},
+					...(compat ? { compat } : {}),
 					contextWindow: m.limit?.context || 4096,
 					maxTokens: m.limit?.output || 4096,
 				});
@@ -763,7 +802,7 @@ async function generateModels() {
 			name: "Claude Opus 4.6 (EU)",
 			api: "bedrock-converse-stream",
 			provider: "amazon-bedrock",
-			baseUrl: "https://bedrock-runtime.us-east-1.amazonaws.com",
+			baseUrl: getBedrockBaseUrl("eu.anthropic.claude-opus-4-6-v1"),
 			reasoning: true,
 			input: ["text", "image"],
 			cost: {
@@ -1215,6 +1254,18 @@ async function generateModels() {
 		{
 			id: "gemini-3-flash-preview",
 			name: "Gemini 3 Flash Preview (Cloud Code Assist)",
+			api: "google-gemini-cli",
+			provider: "google-gemini-cli",
+			baseUrl: CLOUD_CODE_ASSIST_ENDPOINT,
+			reasoning: true,
+			input: ["text", "image"],
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+			contextWindow: 1048576,
+			maxTokens: 65535,
+		},
+		{
+			id: "gemini-3.1-flash-lite-preview",
+			name: "Gemini 3.1 Flash Lite Preview (Cloud Code Assist)",
 			api: "google-gemini-cli",
 			provider: "google-gemini-cli",
 			baseUrl: CLOUD_CODE_ASSIST_ENDPOINT,

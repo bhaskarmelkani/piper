@@ -12,6 +12,7 @@ import type { AssistantMessage, ImageContent, Message, Model, OAuthProviderId } 
 import { getOAuthProviders } from "@mariozechner/pi-ai/oauth";
 import type {
 	AutocompleteItem,
+	AutocompleteProvider,
 	EditorComponent,
 	EditorTheme,
 	Keybinding,
@@ -30,6 +31,7 @@ import {
 	fuzzyFilter,
 	HorizontalSplit,
 	Loader,
+	type LoaderIndicatorOptions,
 	Markdown,
 	matchesKey,
 	ProcessTerminal,
@@ -58,6 +60,8 @@ import {
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.js";
 import type {
+	AutocompleteProviderFactory,
+	ExtensionCommandContext,
 	ExtensionContext,
 	ExtensionRunner,
 	ExtensionSidebarOptions,
@@ -76,6 +80,7 @@ import { formatMissingSessionCwdPrompt, MissingSessionCwdError } from "../../cor
 import { type SessionContext, SessionManager } from "../../core/session-manager.js";
 import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.js";
 import type { SourceInfo } from "../../core/source-info.js";
+import { isInstallTelemetryEnabled } from "../../core/telemetry.js";
 import type { TruncationResult } from "../../core/tools/truncate.js";
 import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.js";
 import { copyToClipboard } from "../../utils/clipboard.js";
@@ -179,11 +184,6 @@ function isAnthropicSubscriptionAuthKey(apiKey: string | undefined): boolean {
 	return typeof apiKey === "string" && apiKey.startsWith("sk-ant-oat");
 }
 
-function isTruthyEnvFlag(value: string | undefined): boolean {
-	if (!value) return false;
-	return value === "1" || value.toLowerCase() === "true" || value.toLowerCase() === "yes";
-}
-
 function isUnknownModel(model: Model<any> | undefined): boolean {
 	return !!model && model.provider === "unknown" && model.id === "unknown" && model.api === "unknown";
 }
@@ -229,7 +229,8 @@ export class InteractiveMode {
 	private statusContainer: Container;
 	private defaultEditor: CustomEditor;
 	private editor: EditorComponent;
-	private autocompleteProvider: CombinedAutocompleteProvider | undefined;
+	private autocompleteProvider: AutocompleteProvider | undefined;
+	private autocompleteProviderWrappers: AutocompleteProviderFactory[] = [];
 	private fdPath: string | undefined;
 	private transcriptContainer: Container;
 	private transcriptViewport: Viewport;
@@ -250,6 +251,7 @@ export class InteractiveMode {
 	private onInputCallback?: (text: string) => void;
 	private loadingAnimation: Loader | undefined = undefined;
 	private pendingWorkingMessage: string | undefined = undefined;
+	private workingIndicatorOptions: LoaderIndicatorOptions | undefined = undefined;
 	private readonly defaultWorkingMessage = "Working...";
 	private readonly defaultHiddenThinkingLabel = "Thinking...";
 	private hiddenThinkingLabel = this.defaultHiddenThinkingLabel;
@@ -386,6 +388,9 @@ export class InteractiveMode {
 		private options: InteractiveModeOptions = {},
 	) {
 		this.runtimeHost = runtimeHost;
+		this.runtimeHost.setRebindSession(async () => {
+			await this.rebindCurrentSession();
+		});
 		this.version = VERSION;
 		this.ui = new TUI(new ProcessTerminal(), this.settingsManager.getShowHardwareCursor());
 		this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
@@ -401,7 +406,6 @@ export class InteractiveMode {
 		this.dockTransientContainer = new Container();
 		this.dockHintsText = new Text("", SHELL_LEFT_INSET, 0);
 		this.dockHints = new Container();
-		this.dockHints.addChild(new Spacer(1));
 		this.dockHints.addChild(this.dockHintsText);
 		this.shellLayout = new HorizontalSplit(
 			this.transcriptViewport,
@@ -483,11 +487,7 @@ export class InteractiveMode {
 		return description ? `[${sourceTag}] ${description}` : `[${sourceTag}]`;
 	}
 
-	private getBuiltInCommandConflictDiagnostics(extensionRunner: ExtensionRunner | undefined): ResourceDiagnostic[] {
-		if (!extensionRunner) {
-			return [];
-		}
-
+	private getBuiltInCommandConflictDiagnostics(extensionRunner: ExtensionRunner): ResourceDiagnostic[] {
 		const builtinNames = new Set(BUILTIN_SLASH_COMMANDS.map((command) => command.name));
 		return extensionRunner
 			.getRegisteredCommands()
@@ -502,7 +502,7 @@ export class InteractiveMode {
 			}));
 	}
 
-	private setupAutocomplete(fdPath: string | undefined): void {
+	private createBaseAutocompleteProvider(): AutocompleteProvider {
 		// Define commands for autocomplete
 		const slashCommands: SlashCommand[] = BUILTIN_SLASH_COMMANDS.map((command) => ({
 			name: command.name,
@@ -549,13 +549,14 @@ export class InteractiveMode {
 
 		// Convert extension commands to SlashCommand format
 		const builtinCommandNames = new Set(slashCommands.map((c) => c.name));
-		const extensionCommands: SlashCommand[] = (
-			this.session.extensionRunner?.getRegisteredCommands().filter((cmd) => !builtinCommandNames.has(cmd.name)) ?? []
-		).map((cmd) => ({
-			name: cmd.invocationName,
-			description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
-			getArgumentCompletions: cmd.getArgumentCompletions,
-		}));
+		const extensionCommands: SlashCommand[] = this.session.extensionRunner
+			.getRegisteredCommands()
+			.filter((cmd) => !builtinCommandNames.has(cmd.name))
+			.map((cmd) => ({
+				name: cmd.invocationName,
+				description: this.prefixAutocompleteDescription(cmd.description, cmd.sourceInfo),
+				getArgumentCompletions: cmd.getArgumentCompletions,
+			}));
 
 		// Build skill commands from session.skills (if enabled)
 		this.skillCommands.clear();
@@ -571,15 +572,23 @@ export class InteractiveMode {
 			}
 		}
 
-		// Setup autocomplete
-		this.autocompleteProvider = new CombinedAutocompleteProvider(
+		return new CombinedAutocompleteProvider(
 			[...slashCommands, ...templateCommands, ...extensionCommands, ...skillCommandList],
 			this.sessionManager.getCwd(),
-			fdPath,
+			this.fdPath,
 		);
-		this.defaultEditor.setAutocompleteProvider(this.autocompleteProvider);
+	}
+
+	private setupAutocompleteProvider(): void {
+		let provider = this.createBaseAutocompleteProvider();
+		for (const wrapProvider of this.autocompleteProviderWrappers) {
+			provider = wrapProvider(provider);
+		}
+
+		this.autocompleteProvider = provider;
+		this.defaultEditor.setAutocompleteProvider(provider);
 		if (this.editor !== this.defaultEditor) {
-			this.editor.setAutocompleteProvider?.(this.autocompleteProvider);
+			this.editor.setAutocompleteProvider?.(provider);
 		}
 	}
 
@@ -682,16 +691,10 @@ export class InteractiveMode {
 		});
 
 		// Initialize extensions first so resources are shown before messages
-		await this.bindCurrentSessionExtensions();
+		await this.rebindCurrentSession();
 
 		// Render initial messages AFTER showing loaded resources
 		this.renderInitialMessages();
-
-		// Set terminal title
-		this.updateTerminalTitle();
-
-		// Subscribe to agent events
-		this.subscribeToAgent();
 
 		// Set up theme file watcher
 		onThemeChange(() => {
@@ -1170,10 +1173,7 @@ export class InteractiveMode {
 			return;
 		}
 
-		const telemetryEnv = process.env.PI_TELEMETRY;
-		const telemetryEnabled =
-			telemetryEnv !== undefined ? isTruthyEnvFlag(telemetryEnv) : this.settingsManager.getEnableInstallTelemetry();
-		if (!telemetryEnabled) {
+		if (!isInstallTelemetryEnabled(this.settingsManager)) {
 			return;
 		}
 
@@ -1841,11 +1841,11 @@ export class InteractiveMode {
 				}
 			}
 
-			const commandDiagnostics = this.session.extensionRunner?.getCommandDiagnostics() ?? [];
+			const commandDiagnostics = this.session.extensionRunner.getCommandDiagnostics();
 			extensionDiagnostics.push(...commandDiagnostics);
 			extensionDiagnostics.push(...this.getBuiltInCommandConflictDiagnostics(this.session.extensionRunner));
 
-			const shortcutDiagnostics = this.session.extensionRunner?.getShortcutDiagnostics() ?? [];
+			const shortcutDiagnostics = this.session.extensionRunner.getShortcutDiagnostics();
 			extensionDiagnostics.push(...shortcutDiagnostics);
 
 			if (extensionDiagnostics.length > 0) {
@@ -1904,7 +1904,6 @@ export class InteractiveMode {
 					try {
 						const result = await this.runtimeHost.newSession(options);
 						if (!result.cancelled) {
-							await this.handleRuntimeSessionChange();
 							this.renderCurrentSessionState();
 							this.ui.requestRender();
 						}
@@ -1913,11 +1912,10 @@ export class InteractiveMode {
 						return this.handleFatalRuntimeError("Failed to create session", error);
 					}
 				},
-				fork: async (entryId) => {
+				fork: async (entryId, options) => {
 					try {
-						const result = await this.runtimeHost.fork(entryId);
+						const result = await this.runtimeHost.fork(entryId, options);
 						if (!result.cancelled) {
-							await this.handleRuntimeSessionChange();
 							this.renderCurrentSessionState();
 							this.editor.setText(result.selectedText ?? "");
 							this.showStatus("Forked to new session");
@@ -1947,9 +1945,8 @@ export class InteractiveMode {
 					void this.flushCompactionQueue({ willRetry: false });
 					return { cancelled: false };
 				},
-				switchSession: async (sessionPath) => {
-					await this.handleResumeSession(sessionPath);
-					return { cancelled: false };
+				switchSession: async (sessionPath, options) => {
+					return this.handleResumeSession(sessionPath, options);
 				},
 				reload: async () => {
 					await this.handleReloadCommand();
@@ -1967,15 +1964,9 @@ export class InteractiveMode {
 		});
 
 		setRegisteredThemes(this.session.resourceLoader.getThemes().themes);
-		this.setupAutocomplete(this.fdPath);
+		this.setupAutocompleteProvider();
 
 		const extensionRunner = this.session.extensionRunner;
-		if (!extensionRunner) {
-			this.showLoadedResources({ extensions: [], force: false });
-			this.showStartupNoticesIfNeeded();
-			return;
-		}
-
 		this.setupExtensionShortcuts(extensionRunner);
 		this.showLoadedResources({ force: false });
 		this.showStartupNoticesIfNeeded();
@@ -2000,7 +1991,7 @@ export class InteractiveMode {
 		this.refreshDockHints();
 	}
 
-	private async handleRuntimeSessionChange(): Promise<void> {
+	private async rebindCurrentSession(): Promise<void> {
 		this.resetExtensionUI();
 		this.unsubscribe?.();
 		this.unsubscribe = undefined;
@@ -2103,6 +2094,12 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
+	private setWorkingIndicator(options?: LoaderIndicatorOptions): void {
+		this.workingIndicatorOptions = options;
+		this.loadingAnimation?.setIndicator(options);
+		this.ui.requestRender();
+	}
+
 	private setHiddenThinkingLabel(label?: string): void {
 		this.hiddenThinkingLabel = label ?? this.defaultHiddenThinkingLabel;
 		for (const child of this.chatContainer.children) {
@@ -2194,9 +2191,13 @@ export class InteractiveMode {
 		this.clearExtensionWidgets();
 		this.footerDataProvider.clearExtensionStatuses();
 		this.footer.invalidate();
+		this.autocompleteProviderWrappers = [];
 		this.setCustomEditorComponent(undefined);
+		this.setupAutocompleteProvider();
 		this.defaultEditor.onExtensionShortcut = undefined;
 		this.updateTerminalTitle();
+		this.pendingWorkingMessage = undefined;
+		this.setWorkingIndicator();
 		if (this.loadingAnimation) {
 			this.loadingAnimation.setMessage(`${this.defaultWorkingMessage} (${keyText("app.interrupt")} to interrupt)`);
 		}
@@ -2352,6 +2353,7 @@ export class InteractiveMode {
 					this.pendingWorkingMessage = message;
 				}
 			},
+			setWorkingIndicator: (options) => this.setWorkingIndicator(options),
 			setHiddenThinkingLabel: (label) => this.setHiddenThinkingLabel(label),
 			setWidget: (key, content, options) => this.setExtensionWidget(key, content, options),
 			setFooter: (factory) => this.setExtensionFooter(factory),
@@ -2362,6 +2364,10 @@ export class InteractiveMode {
 			setEditorText: (text) => this.editor.setText(text),
 			getEditorText: () => this.editor.getExpandedText?.() ?? this.editor.getText(),
 			editor: (title, prefill) => this.showExtensionEditor(title, prefill),
+			addAutocompleteProvider: (factory) => {
+				this.autocompleteProviderWrappers.push(factory);
+				this.setupAutocompleteProvider();
+			},
 			setEditorComponent: (factory) => this.setCustomEditorComponent(factory),
 			get theme() {
 				return theme;
@@ -2939,6 +2945,11 @@ export class InteractiveMode {
 				this.editor.setText("");
 				return;
 			}
+			if (text === "/clone") {
+				this.editor.setText("");
+				await this.handleCloneCommand();
+				return;
+			}
 			if (text === "/tree") {
 				this.showTreeSelector();
 				this.editor.setText("");
@@ -3063,6 +3074,7 @@ export class InteractiveMode {
 
 		switch (event.type) {
 			case "agent_start":
+				this.ui.terminal.setProgress(true);
 				// Restore main escape handler if retry handler is still active
 				// (retry success event fires later, but we need main handler now)
 				if (this.retryEscapeHandler) {
@@ -3086,6 +3098,7 @@ export class InteractiveMode {
 					(spinner) => theme.fg("accent", spinner),
 					(text) => theme.fg("muted", text),
 					this.defaultWorkingMessage,
+					this.workingIndicatorOptions,
 				);
 				this.statusContainer.addChild(this.loadingAnimation);
 				// Apply any pending working message queued before loader existed
@@ -3139,6 +3152,7 @@ export class InteractiveMode {
 									content.arguments,
 									{
 										showImages: this.settingsManager.getShowImages(),
+										imageWidthCells: this.settingsManager.getImageWidthCells(),
 									},
 									this.getRegisteredToolDefinition(content.name),
 									this.ui,
@@ -3207,6 +3221,7 @@ export class InteractiveMode {
 						event.args,
 						{
 							showImages: this.settingsManager.getShowImages(),
+							imageWidthCells: this.settingsManager.getImageWidthCells(),
 						},
 						this.getRegisteredToolDefinition(event.toolName),
 						this.ui,
@@ -3241,6 +3256,7 @@ export class InteractiveMode {
 			}
 
 			case "agent_end":
+				this.ui.terminal.setProgress(false);
 				if (this.loadingAnimation) {
 					this.loadingAnimation.stop();
 					this.loadingAnimation = undefined;
@@ -3259,6 +3275,7 @@ export class InteractiveMode {
 				break;
 
 			case "compaction_start": {
+				this.ui.terminal.setProgress(true);
 				// Keep editor active; submissions are queued during compaction.
 				this.autoCompactionEscapeHandler = this.defaultEditor.onEscape;
 				this.defaultEditor.onEscape = () => {
@@ -3282,6 +3299,7 @@ export class InteractiveMode {
 			}
 
 			case "compaction_end": {
+				this.ui.terminal.setProgress(false);
 				if (this.autoCompactionEscapeHandler) {
 					this.defaultEditor.onEscape = this.autoCompactionEscapeHandler;
 					this.autoCompactionEscapeHandler = undefined;
@@ -3433,7 +3451,7 @@ export class InteractiveMode {
 			}
 			case "custom": {
 				if (message.display) {
-					const renderer = this.session.extensionRunner?.getMessageRenderer(message.customType);
+					const renderer = this.session.extensionRunner.getMessageRenderer(message.customType);
 					const component = new CustomMessageComponent(message, renderer, this.getMarkdownThemeWithSettings());
 					component.setExpanded(this.toolOutputExpanded);
 					this.chatContainer.addChild(component);
@@ -3537,7 +3555,10 @@ export class InteractiveMode {
 							content.name,
 							content.id,
 							content.arguments,
-							{ showImages: this.settingsManager.getShowImages() },
+							{
+								showImages: this.settingsManager.getShowImages(),
+								imageWidthCells: this.settingsManager.getImageWidthCells(),
+							},
 							this.getRegisteredToolDefinition(content.name),
 							this.ui,
 							this.sessionManager.getCwd(),
@@ -4043,7 +4064,6 @@ export class InteractiveMode {
 		if (!text.startsWith("/")) return false;
 
 		const extensionRunner = this.session.extensionRunner;
-		if (!extensionRunner) return false;
 
 		const spaceIndex = text.indexOf(" ");
 		const commandName = spaceIndex === -1 ? text.slice(1) : text.slice(1, spaceIndex);
@@ -4160,6 +4180,7 @@ export class InteractiveMode {
 					planMode: this.settingsManager.getPlanMode(),
 					editMode: this.settingsManager.getEditMode(),
 					showImages: this.settingsManager.getShowImages(),
+					imageWidthCells: this.settingsManager.getImageWidthCells(),
 					autoResizeImages: this.settingsManager.getImageAutoResize(),
 					blockImages: this.settingsManager.getBlockImages(),
 					enableSkillCommands: this.settingsManager.getEnableSkillCommands(),
@@ -4200,6 +4221,14 @@ export class InteractiveMode {
 							}
 						}
 					},
+					onImageWidthCellsChange: (width) => {
+						this.settingsManager.setImageWidthCells(width);
+						for (const child of this.chatContainer.children) {
+							if (child instanceof ToolExecutionComponent) {
+								child.setImageWidthCells(width);
+							}
+						}
+					},
 					onAutoResizeImagesChange: (enabled) => {
 						this.settingsManager.setImageAutoResize(enabled);
 					},
@@ -4208,7 +4237,7 @@ export class InteractiveMode {
 					},
 					onEnableSkillCommandsChange: (enabled) => {
 						this.settingsManager.setEnableSkillCommands(enabled);
-						this.setupAutocomplete(this.fdPath);
+						this.setupAutocompleteProvider();
 					},
 					onSteeringModeChange: (mode) => {
 						this.session.setSteeringMode(mode);
@@ -4610,29 +4639,59 @@ export class InteractiveMode {
 			return;
 		}
 
+		const initialSelectedId = userMessages[userMessages.length - 1]?.entryId;
+
 		this.showSelector((done) => {
 			const selector = new UserMessageSelectorComponent(
 				userMessages.map((m) => ({ id: m.entryId, text: m.text })),
 				async (entryId) => {
-					const result = await this.runtimeHost.fork(entryId);
-					if (result.cancelled) {
+					try {
+						const result = await this.runtimeHost.fork(entryId);
+						if (result.cancelled) {
+							done();
+							this.ui.requestRender();
+							return;
+						}
+
+						this.renderCurrentSessionState();
+						this.editor.setText(result.selectedText ?? "");
 						done();
-						this.ui.requestRender();
-						return;
+						this.showStatus("Forked to new session");
+					} catch (error: unknown) {
+						done();
+						this.showError(error instanceof Error ? error.message : String(error));
 					}
-					await this.handleRuntimeSessionChange();
-					this.renderCurrentSessionState();
-					this.editor.setText(result.selectedText ?? "");
-					done();
-					this.showStatus("Branched to new session");
 				},
 				() => {
 					done();
 					this.ui.requestRender();
 				},
+				initialSelectedId,
 			);
 			return { component: selector, focus: selector.getMessageList() };
 		});
+	}
+
+	private async handleCloneCommand(): Promise<void> {
+		const leafId = this.sessionManager.getLeafId();
+		if (!leafId) {
+			this.showStatus("Nothing to clone yet");
+			return;
+		}
+
+		try {
+			const result = await this.runtimeHost.fork(leafId, { position: "at" });
+			if (result.cancelled) {
+				this.ui.requestRender();
+				return;
+			}
+
+			this.renderCurrentSessionState();
+			this.editor.setText("");
+			this.showStatus("Cloned to new session");
+		} catch (error: unknown) {
+			this.showError(error instanceof Error ? error.message : String(error));
+		}
 	}
 
 	private showTreeSelector(initialSelectedId?: string): void {
@@ -4799,37 +4858,44 @@ export class InteractiveMode {
 		});
 	}
 
-	private async handleResumeSession(sessionPath: string): Promise<void> {
+	private async handleResumeSession(
+		sessionPath: string,
+		options?: Parameters<ExtensionCommandContext["switchSession"]>[1],
+	): Promise<{ cancelled: boolean }> {
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;
 		}
 		this.statusContainer.clear();
 		try {
-			const result = await this.runtimeHost.switchSession(sessionPath);
+			const result = await this.runtimeHost.switchSession(sessionPath, {
+				withSession: options?.withSession,
+			});
 			if (result.cancelled) {
-				return;
+				return result;
 			}
-			await this.handleRuntimeSessionChange();
 			this.renderCurrentSessionState();
 			this.showStatus("Resumed session");
+			return result;
 		} catch (error: unknown) {
 			if (error instanceof MissingSessionCwdError) {
 				const selectedCwd = await this.promptForMissingSessionCwd(error);
 				if (!selectedCwd) {
 					this.showStatus("Resume cancelled");
-					return;
+					return { cancelled: true };
 				}
-				const result = await this.runtimeHost.switchSession(sessionPath, selectedCwd);
+				const result = await this.runtimeHost.switchSession(sessionPath, {
+					cwdOverride: selectedCwd,
+					withSession: options?.withSession,
+				});
 				if (result.cancelled) {
-					return;
+					return result;
 				}
-				await this.handleRuntimeSessionChange();
 				this.renderCurrentSessionState();
 				this.showStatus("Resumed session in current cwd");
-				return;
+				return result;
 			}
-			await this.handleFatalRuntimeError("Failed to resume session", error);
+			return this.handleFatalRuntimeError("Failed to resume session", error);
 		}
 	}
 
@@ -5069,11 +5135,9 @@ export class InteractiveMode {
 			}
 			this.ui.setShowHardwareCursor(this.settingsManager.getShowHardwareCursor());
 			this.ui.setClearOnShrink(this.settingsManager.getClearOnShrink());
-			this.setupAutocomplete(this.fdPath);
+			this.setupAutocompleteProvider();
 			const runner = this.session.extensionRunner;
-			if (runner) {
-				this.setupExtensionShortcuts(runner);
-			}
+			this.setupExtensionShortcuts(runner);
 			this.rebuildChatFromMessages();
 			dismissReloadBox();
 			this.showLoadedResources({
@@ -5161,7 +5225,6 @@ export class InteractiveMode {
 				this.showStatus("Import cancelled");
 				return;
 			}
-			await this.handleRuntimeSessionChange();
 			this.renderCurrentSessionState();
 			this.showStatus(`Session imported from: ${inputPath}`);
 		} catch (error: unknown) {
@@ -5176,7 +5239,6 @@ export class InteractiveMode {
 					this.showStatus("Import cancelled");
 					return;
 				}
-				await this.handleRuntimeSessionChange();
 				this.renderCurrentSessionState();
 				this.showStatus(`Session imported from: ${inputPath}`);
 				return;
@@ -5560,19 +5622,17 @@ export class InteractiveMode {
 
 		// Add extension-registered shortcuts
 		const extensionRunner = this.session.extensionRunner;
-		if (extensionRunner) {
-			const shortcuts = extensionRunner.getShortcuts(this.keybindings.getEffectiveConfig());
-			if (shortcuts.size > 0) {
-				hotkeys += `
+		const shortcuts = extensionRunner.getShortcuts(this.keybindings.getEffectiveConfig());
+		if (shortcuts.size > 0) {
+			hotkeys += `
 **Extensions**
 | Key | Action |
 |-----|--------|
 `;
-				for (const [key, shortcut] of shortcuts) {
-					const description = shortcut.description ?? shortcut.extensionPath;
-					const keyDisplay = key.replace(/\b\w/g, (c) => c.toUpperCase());
-					hotkeys += `| \`${keyDisplay}\` | ${description} |\n`;
-				}
+			for (const [key, shortcut] of shortcuts) {
+				const description = shortcut.description ?? shortcut.extensionPath;
+				const keyDisplay = key.replace(/\b\w/g, (c) => c.toUpperCase());
+				hotkeys += `| \`${keyDisplay}\` | ${description} |\n`;
 			}
 		}
 
@@ -5596,7 +5656,6 @@ export class InteractiveMode {
 			if (result.cancelled) {
 				return;
 			}
-			await this.handleRuntimeSessionChange();
 			this.renderCurrentSessionState();
 			this.chatContainer.addChild(new Spacer(1));
 			this.chatContainer.addChild(new Text(`${theme.fg("accent", "✓ New session started")}`, 1, 1));
@@ -5667,14 +5726,12 @@ export class InteractiveMode {
 		const extensionRunner = this.session.extensionRunner;
 
 		// Emit user_bash event to let extensions intercept
-		const eventResult = extensionRunner
-			? await extensionRunner.emitUserBash({
-					type: "user_bash",
-					command,
-					excludeFromContext,
-					cwd: this.sessionManager.getCwd(),
-				})
-			: undefined;
+		const eventResult = await extensionRunner.emitUserBash({
+			type: "user_bash",
+			command,
+			excludeFromContext,
+			cwd: this.sessionManager.getCwd(),
+		});
 
 		// If extension returned a full result, use it directly
 		if (eventResult?.result) {
@@ -5777,6 +5834,7 @@ export class InteractiveMode {
 
 	stop(): void {
 		this.unregisterSignalHandlers();
+		this.ui.terminal.setProgress(false);
 		if (this.loadingAnimation) {
 			this.loadingAnimation.stop();
 			this.loadingAnimation = undefined;

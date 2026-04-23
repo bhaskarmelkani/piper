@@ -8,6 +8,7 @@ describe("buildSystemPrompt", () => {
 				selectedTools: [],
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).toContain("Available tools:\n(none)");
@@ -18,6 +19,7 @@ describe("buildSystemPrompt", () => {
 				selectedTools: [],
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).toContain("Show file paths clearly");
@@ -38,6 +40,7 @@ describe("buildSystemPrompt", () => {
 				},
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).toContain("- read:");
@@ -59,6 +62,7 @@ describe("buildSystemPrompt", () => {
 				},
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).toContain("- dynamic_tool: Run dynamic test behavior");
@@ -69,6 +73,7 @@ describe("buildSystemPrompt", () => {
 				selectedTools: ["read", "dynamic_tool"],
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).not.toContain("dynamic_tool");
@@ -82,6 +87,7 @@ describe("buildSystemPrompt", () => {
 				promptGuidelines: ["Use dynamic_tool for project summaries."],
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).toContain("- Use dynamic_tool for project summaries.");
@@ -93,6 +99,7 @@ describe("buildSystemPrompt", () => {
 				promptGuidelines: ["Use dynamic_tool for summaries.", "  Use dynamic_tool for summaries.  ", "   "],
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt.match(/- Use dynamic_tool for summaries\./g)).toHaveLength(1);
@@ -103,6 +110,7 @@ describe("buildSystemPrompt", () => {
 				selectedTools: ["read", "bash", "search_code", "symbols_overview", "subagent"],
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).toContain("Use search_code for keyword, regex, filename, or AST discovery before bash");
@@ -119,12 +127,14 @@ describe("buildSystemPrompt", () => {
 				planMode: true,
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 			const withoutPlanMode = buildSystemPrompt({
 				selectedTools: ["edit", "write"],
 				planMode: false,
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(withPlanMode).toContain("When plan mode is on");
@@ -138,12 +148,14 @@ describe("buildSystemPrompt", () => {
 				editMode: false,
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 			const withoutEditGate = buildSystemPrompt({
 				selectedTools: ["edit", "write", "confirm"],
 				editMode: true,
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(withEditGate).toContain("Before editing any non-.plans files");
@@ -157,6 +169,7 @@ describe("buildSystemPrompt", () => {
 				editMode: false,
 				contextFiles: [],
 				skills: [],
+				cwd: process.cwd(),
 			});
 
 			expect(prompt).not.toContain("Execute each milestone using a worker subagent");

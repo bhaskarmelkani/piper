@@ -1,12 +1,17 @@
 import { existsSync } from "node:fs";
 import { delimiter } from "node:path";
 import { spawn, spawnSync } from "child_process";
-import { getBinDir, getSettingsPath } from "../config.js";
+import { getBinDir } from "../config.js";
 import { SettingsManager } from "../core/settings-manager.js";
+
+export interface ShellConfig {
+	shell: string;
+	args: string[];
+}
 
 export type ShellExecutionMode = "tool" | "user";
 
-let cachedShellConfigs = new Map<ShellExecutionMode, { shell: string; args: string[] }>();
+let cachedShellConfigs = new Map<ShellExecutionMode, ShellConfig>();
 
 function getShellBasename(shellPath: string): string {
 	const normalized = shellPath.replace(/\\/g, "/");
@@ -73,10 +78,9 @@ function findBashOnPath(): string | null {
 }
 
 /**
- * Get shell configuration based on platform.
+ * Resolve shell configuration based on platform and an optional explicit shell path.
  * Resolution order:
- * Tool mode:
- * 1. User-specified shellPath in settings.json
+ * 1. User-specified shellPath in settings.json or explicit shell path argument
  * 2. On Windows: Git Bash in known locations, then bash on PATH
  * 3. On Unix: /bin/bash, then bash on PATH, then fallback to sh
  *
@@ -85,25 +89,29 @@ function findBashOnPath(): string | null {
  * 2. On Unix: $SHELL when it exists
  * 3. Fall back to tool-mode resolution
  */
-export function getShellConfig(mode: ShellExecutionMode = "tool"): { shell: string; args: string[] } {
-	const cached = cachedShellConfigs.get(mode);
-	if (cached) {
-		return cached;
+export function getShellConfig(modeOrShellPath: ShellExecutionMode | string = "tool"): ShellConfig {
+	const mode: ShellExecutionMode = modeOrShellPath === "user" ? "user" : "tool";
+	const explicitShellPath = modeOrShellPath === "tool" || modeOrShellPath === "user" ? undefined : modeOrShellPath;
+
+	if (!explicitShellPath) {
+		const cached = cachedShellConfigs.get(mode);
+		if (cached) {
+			return cached;
+		}
 	}
 
-	const settings = SettingsManager.create();
-	const customShellPath = settings.getShellPath();
+	const settings = explicitShellPath ? undefined : SettingsManager.create(process.cwd());
+	const customShellPath = explicitShellPath ?? settings?.getShellPath();
 
-	// 1. Check user-specified shell path
 	if (customShellPath) {
 		if (existsSync(customShellPath)) {
 			const config = { shell: customShellPath, args: getShellArgs(customShellPath, mode) };
-			cachedShellConfigs.set(mode, config);
+			if (!explicitShellPath) {
+				cachedShellConfigs.set(mode, config);
+			}
 			return config;
 		}
-		throw new Error(
-			`Custom shell path not found: ${customShellPath}\nPlease update shellPath in ${getSettingsPath()}`,
-		);
+		throw new Error(`Custom shell path not found: ${customShellPath}`);
 	}
 
 	if (mode === "user" && process.platform !== "win32") {
@@ -147,7 +155,7 @@ export function getShellConfig(mode: ShellExecutionMode = "tool"): { shell: stri
 			`No bash shell found. Options:\n` +
 				`  1. Install Git for Windows: https://git-scm.com/download/win\n` +
 				`  2. Add your bash to PATH (Cygwin, MSYS2, etc.)\n` +
-				`  3. Set shellPath in ${getSettingsPath()}\n\n` +
+				"  3. Set shellPath in settings.json\n\n" +
 				`Searched Git Bash in:\n${paths.map((p) => `  ${p}`).join("\n")}`,
 		);
 	}
