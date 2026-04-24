@@ -86,7 +86,7 @@ const ROLE_CONFIGS: Record<BuiltInSubagentRole, RoleConfig> = {
 		role: "planner",
 		description: "Plan compression from findings",
 		prompt:
-			"You are planner. Turn findings into a short implementation plan with key risks and decision points. Do not edit files.",
+			"You are planner. Turn findings into a short planning handoff with grounded facts, milestones, validation, and risks. Do not edit files or invent plan file paths.",
 		tools: ["read", "search_code", "symbols_overview", "grep", "find", "ls"],
 		writeCapable: false,
 	},

@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fauxAssistantMessage } from "@mariozechner/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildSubagentSchedulerPlan, shouldAutoPlanForSchedulePlan } from "../src/core/subagents/scheduler.js";
+import { buildSubagentSchedulerPlan } from "../src/core/subagents/scheduler.js";
 import { createHarness, getUserTexts } from "./suite/harness.js";
 
 describe("subagent scheduler", () => {
@@ -15,7 +15,6 @@ describe("subagent scheduler", () => {
 		});
 
 		expect(plan?.mode).toBe("parallel");
-		expect(shouldAutoPlanForSchedulePlan(plan)).toBe(true);
 		expect(plan?.tasks).toHaveLength(2);
 		expect(plan?.tasks.every((task) => task.role === "scout")).toBe(true);
 	});
@@ -30,9 +29,10 @@ describe("subagent scheduler", () => {
 		});
 
 		expect(plan?.mode).toBe("chain");
-		expect(shouldAutoPlanForSchedulePlan(plan)).toBe(true);
 		expect(plan?.tasks.map((task) => task.role)).toEqual(["scout", "planner"]);
 		expect(plan?.note).toContain("{previous}");
+		expect(plan?.tasks[0]?.task).toContain("planning handoff");
+		expect(plan?.tasks[1]?.task).toContain("Do not invent a plan file path");
 	});
 
 	it("stays single-agent for small direct edit tasks", () => {
@@ -44,7 +44,6 @@ describe("subagent scheduler", () => {
 		});
 
 		expect(plan).toBeUndefined();
-		expect(shouldAutoPlanForSchedulePlan(plan)).toBe(false);
 	});
 
 	it("never auto-spawns a worker", () => {
@@ -81,7 +80,7 @@ describe("subagent scheduler prompt injection", () => {
 		harnesses.length = 0;
 	});
 
-	it("injects a hidden scheduler message for repo code exploration", async () => {
+	it("injects a hidden scheduler message without enabling plan mode", async () => {
 		const harness = await createHarness();
 		harnesses.push(harness);
 		writeFileSync(join(harness.tempDir, "package.json"), JSON.stringify({ name: "scheduler-test" }));
@@ -121,13 +120,9 @@ describe("subagent scheduler prompt injection", () => {
 		).toBe(true);
 		expect(
 			harness.session.messages.some(
-				(message) =>
-					message.role === "custom" &&
-					message.customType === "planning_context" &&
-					message.display === false &&
-					(message.details as { mode?: string } | undefined)?.mode === "auto",
+				(message) => message.role === "custom" && message.customType === "planning_context",
 			),
-		).toBe(true);
+		).toBe(false);
 	});
 
 	it("does not inject a scheduler message for a simple direct task", async () => {
@@ -150,5 +145,55 @@ describe("subagent scheduler prompt injection", () => {
 				(message) => message.role === "custom" && message.customType === "planning_context",
 			),
 		).toBe(false);
+	});
+
+	it("does not inject a scheduler message when the prompt suppresses scheduling", async () => {
+		const harness = await createHarness();
+		harnesses.push(harness);
+		writeFileSync(join(harness.tempDir, "package.json"), JSON.stringify({ name: "scheduler-test" }));
+		harness.session.setActiveToolsByName(["read", "search_code", "symbols_overview", "subagent"]);
+
+		harness.setResponses([fauxAssistantMessage("done")]);
+		await harness.session.prompt(
+			"Execute this plan from a fresh session.\n\nTrace the auth flow across the repository and implement the handoff.",
+			{ suppressSubagentScheduler: true },
+		);
+
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "custom" && message.customType === "subagent_scheduler",
+			),
+		).toBe(false);
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "custom" && message.customType === "planning_context",
+			),
+		).toBe(false);
+	});
+
+	it("does not inject a scheduler message when plan mode is enabled", async () => {
+		const harness = await createHarness({ settings: { planMode: true } });
+		harnesses.push(harness);
+		writeFileSync(join(harness.tempDir, "package.json"), JSON.stringify({ name: "scheduler-test" }));
+		harness.session.setActiveToolsByName(["read", "search_code", "symbols_overview", "subagent"]);
+
+		harness.setResponses([fauxAssistantMessage("done")]);
+		await harness.session.prompt(
+			"Trace the auth flow across the session setup and provider request code in this repository.",
+		);
+
+		expect(
+			harness.session.messages.some(
+				(message) => message.role === "custom" && message.customType === "subagent_scheduler",
+			),
+		).toBe(false);
+		expect(
+			harness.session.messages.some(
+				(message) =>
+					message.role === "custom" &&
+					message.customType === "planning_context" &&
+					(message.details as { mode?: string } | undefined)?.mode === "on",
+			),
+		).toBe(true);
 	});
 });

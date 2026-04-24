@@ -31,10 +31,11 @@ compaction-results/
 syntax.jsonl
 out.jsonl
 pi-*.html
+piper-session-*.html
 out.html
 packages/coding-agent/binaries/
 todo.md
-plans/
+.plans/
 .pi/hf-sessions/
 .pi/hf-sessions-backup/
 collect.sh

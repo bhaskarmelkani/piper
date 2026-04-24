@@ -139,6 +139,8 @@ Type `/` in the editor to trigger commands. [Extensions](#extensions) can regist
 | `/model` | Switch models |
 | `/scoped-models` | Enable/disable models for Ctrl+P cycling |
 | `/settings` | Thinking level, theme, message delivery, transport |
+| `/plan [on|off]` | Toggle plan mode |
+| `/edit [on|off]` | Toggle edit mode |
 | `/resume` | Pick from previous sessions |
 | `/new` | Start a new session |
 | `/name <name>` | Set session display name |
@@ -423,7 +425,7 @@ Piper is aggressively extensible so it doesn't have to dictate your workflow. Fe
 
 **No permission popups.** Run in a container, or build your own confirmation flow with [extensions](#extensions) inline with your environment and security requirements.
 
-**Built-in plan mode.** Use it to do read-only exploration, write a `.plans` handoff file, and stop before repo edits. Then disable plan mode to execute the plan.
+**Built-in plan mode.** Use it to do read-only exploration, write a `.plans` handoff file, and stop before repo edits. Piper then asks whether to execute the handoff in a fresh session with plan mode off.
 
 **No built-in to-dos.** They confuse models. Use a TODO.md file, or build your own with [extensions](#extensions).
 

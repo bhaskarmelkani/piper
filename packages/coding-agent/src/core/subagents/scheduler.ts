@@ -109,11 +109,11 @@ function buildScoutPlannerPlan(prompt: string): SubagentSchedulePlan {
 	const tasks: ScheduledSubagentTask[] = [
 		{
 			role: "scout",
-			task: `Do read-only exploration for this task and collect only the facts needed for implementation planning:\n${prompt}`,
+			task: `Do read-only exploration for this task and collect only the facts needed for a planning handoff:\n${prompt}`,
 		},
 		{
 			role: "planner",
-			task: "Turn the scout findings into a compact implementation plan with files, risks, and next edits.\n\nScout findings:\n{previous}",
+			task: "Turn the scout findings into a compact planning handoff with grounded facts, milestones, validation, and risks. Do not invent a plan file path and do not write files.\n\nScout findings:\n{previous}",
 		},
 	];
 	return {
@@ -121,9 +121,9 @@ function buildScoutPlannerPlan(prompt: string): SubagentSchedulePlan {
 		tasks,
 		reason: "scout_then_planner",
 		note: [
-			"This task benefits from a scout then planner pass before implementation:",
+			"This task benefits from a scout then planner pass before execution:",
 			JSON.stringify({ chain: tasks }, null, 2),
-			"Use the planner output to keep the next edits focused. Keep worker roles for later execution only.",
+			"Use the planner output to keep the handoff focused. Keep worker roles for later execution only.",
 		].join("\n\n"),
 	};
 }
@@ -140,10 +140,6 @@ function buildReviewerPlan(prompt: string): SubagentSchedulePlan {
 			"Keep worker roles for later execution only.",
 		].join("\n\n"),
 	};
-}
-
-export function shouldAutoPlanForSchedulePlan(plan: SubagentSchedulePlan | undefined): boolean {
-	return plan?.mode === "parallel" || plan?.mode === "chain";
 }
 
 export function buildSubagentSchedulerPlan(input: SubagentSchedulerInput): SubagentSchedulePlan | undefined {

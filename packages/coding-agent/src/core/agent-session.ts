@@ -84,7 +84,7 @@ import { CURRENT_SESSION_VERSION, getLatestCompactionEntry, type SessionHeader }
 import type { SettingsManager } from "./settings-manager.js";
 import type { SlashCommandInfo } from "./slash-commands.js";
 import { createSyntheticSourceInfo, type SourceInfo } from "./source-info.js";
-import { buildSubagentSchedulerPlan, shouldAutoPlanForSchedulePlan } from "./subagents/scheduler.js";
+import { buildSubagentSchedulerPlan } from "./subagents/scheduler.js";
 import { type BuildSystemPromptOptions, buildSystemPrompt } from "./system-prompt.js";
 import { type BashOperations, createLocalBashOperations } from "./tools/bash.js";
 import { createAllToolDefinitions } from "./tools/index.js";
@@ -194,6 +194,8 @@ export interface PromptOptions {
 	source?: InputSource;
 	/** Internal hook used by RPC mode to observe prompt preflight acceptance or rejection. */
 	preflightResult?: (success: boolean) => void;
+	/** Internal handoff path: skip hidden subagent scheduling for prompts that already came from a plan. */
+	suppressSubagentScheduler?: boolean;
 }
 
 /** Result from cycleModel() */
@@ -366,6 +368,7 @@ export class AgentSession {
 	private _explorationNudgeActive = false;
 	private _currentPlanningMode: TurnPlanningMode = "off";
 	private _currentTurnPlanContext: TurnPlanContext | undefined = undefined;
+	private _completedTurnPlanContext: TurnPlanContext | undefined = undefined;
 
 	// Bash execution state
 	private _bashAbortController: AbortController | undefined = undefined;
@@ -500,7 +503,13 @@ export class AgentSession {
 	}
 
 	private _buildPlanningCompletionText(): string {
-		return `Planning complete. Handoff written to ${this._currentTurnPlanContext?.path}. Disable plan mode to execute it.`;
+		return `Planning complete. Handoff written to ${this._currentTurnPlanContext?.path}.`;
+	}
+
+	consumeCompletedPlanContext(): TurnPlanContext | undefined {
+		const plan = this._completedTurnPlanContext;
+		this._completedTurnPlanContext = undefined;
+		return plan;
 	}
 
 	private _isRepoMutation(toolName: string, args: unknown): boolean {
@@ -635,6 +644,7 @@ export class AgentSession {
 					this._turnEditApprovalGranted = true;
 				}
 				if (isPlanningWrite && !finalIsError) {
+					this._completedTurnPlanContext = this._currentTurnPlanContext;
 					return {
 						content: [{ type: "text", text: this._buildPlanningCompletionText() }],
 						details: finalDetails,
@@ -660,6 +670,7 @@ export class AgentSession {
 					this._turnEditApprovalGranted = true;
 				}
 				if (isPlanningWrite && !finalIsError) {
+					this._completedTurnPlanContext = this._currentTurnPlanContext;
 					return {
 						content: [{ type: "text", text: this._buildPlanningCompletionText() }],
 						details: finalDetails,
@@ -677,6 +688,7 @@ export class AgentSession {
 				this._turnEditApprovalGranted = true;
 			}
 			if (isPlanningWrite && !finalIsError) {
+				this._completedTurnPlanContext = this._currentTurnPlanContext;
 				return {
 					content: [{ type: "text", text: this._buildPlanningCompletionText() }],
 					details: finalDetails,
@@ -1045,7 +1057,7 @@ export class AgentSession {
 	}
 
 	get planningModeStatus(): TurnPlanningMode {
-		return this.settingsManager.getPlanMode() ? "manual" : this._currentPlanningMode;
+		return this.settingsManager.getPlanMode() ? "on" : "off";
 	}
 
 	get editModeEnabled(): boolean {
@@ -1324,17 +1336,17 @@ export class AgentSession {
 			messages = [];
 
 			const activeToolNames = this.getActiveToolNames();
-			const schedulerPlan = buildSubagentSchedulerPlan({
-				cwd: this._cwd,
-				prompt: expandedText,
-				activeToolNames,
-				mutationStarted,
-			});
-			const planningMode: TurnPlanningMode = this.settingsManager.getPlanMode()
-				? "manual"
-				: shouldAutoPlanForSchedulePlan(schedulerPlan)
-					? "auto"
-					: "off";
+			const planModeEnabled = this.settingsManager.getPlanMode();
+			const schedulerPlan =
+				planModeEnabled || options?.suppressSubagentScheduler
+					? undefined
+					: buildSubagentSchedulerPlan({
+							cwd: this._cwd,
+							prompt: expandedText,
+							activeToolNames,
+							mutationStarted,
+						});
+			const planningMode: TurnPlanningMode = planModeEnabled ? "on" : "off";
 			this._currentPlanningMode = planningMode;
 			if (planningMode !== "off") {
 				this._currentTurnPlanContext = createTurnPlanContext(this._cwd, expandedText, planningMode);

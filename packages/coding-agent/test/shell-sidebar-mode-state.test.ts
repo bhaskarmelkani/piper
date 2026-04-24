@@ -4,7 +4,7 @@ import type { ReadonlyFooterDataProvider } from "../src/core/footer-data-provide
 import { ShellSidebarComponent } from "../src/modes/interactive/components/shell-sidebar.js";
 import { initTheme } from "../src/modes/interactive/theme/theme.js";
 
-function createSession(options?: { plan?: "off" | "auto" | "manual"; edit?: boolean }): AgentSession {
+function createSession(options?: { plan?: "off" | "on"; edit?: boolean }): AgentSession {
 	return {
 		model: {
 			id: "claude-sonnet-4.6",
@@ -45,6 +45,15 @@ function stripAnsi(value: string): string {
 	return value.replace(/\u001b\[[0-9;]*m/g, "");
 }
 
+function getSectionValue(rendered: string, label: string): string | undefined {
+	const lines = rendered
+		.split("\n")
+		.map((line) => line.replace(/^│\s?/, "").trim())
+		.filter((line) => line && !line.startsWith("─"));
+	const labelIndex = lines.indexOf(label);
+	return labelIndex >= 0 ? lines[labelIndex + 1] : undefined;
+}
+
 describe("ShellSidebarComponent mode state", () => {
 	beforeAll(() => {
 		initTheme("dark");
@@ -61,20 +70,11 @@ describe("ShellSidebarComponent mode state", () => {
 		expect(rendered).toContain("on");
 	});
 
-	test("renders manual and auto planning state labels", () => {
-		const manualSidebar = new ShellSidebarComponent(
-			createSession({ plan: "manual", edit: false }),
-			createFooterData(),
-		);
-		manualSidebar.setHeight(24);
-		const manualRendered = stripAnsi(manualSidebar.render(30).join("\n"));
-		expect(manualRendered).toContain("manual");
-		expect(manualRendered).toContain("off");
-
-		const autoSidebar = new ShellSidebarComponent(createSession({ plan: "auto", edit: true }), createFooterData());
-		autoSidebar.setHeight(24);
-		const autoRendered = stripAnsi(autoSidebar.render(30).join("\n"));
-		expect(autoRendered).toContain("auto");
-		expect(autoRendered).toContain("on");
+	test("renders plan as on when planning is active", () => {
+		const planSidebar = new ShellSidebarComponent(createSession({ plan: "on", edit: false }), createFooterData());
+		planSidebar.setHeight(24);
+		const rendered = stripAnsi(planSidebar.render(30).join("\n"));
+		expect(getSectionValue(rendered, "Plan")).toBe("on");
+		expect(getSectionValue(rendered, "Edit")).toBe("off");
 	});
 });

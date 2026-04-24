@@ -24,6 +24,8 @@
 
 ### Changed
 
+- Changed built-in plan mode to produce a single `.plans` handoff only when explicitly enabled, then offer to execute it in a fresh non-plan session.
+- Changed the interactive sidebar plan indicator to show `Plan on/off`.
 - Updated `symbols_overview` system-prompt guideline to mention the ~300-line threshold and quantify the read-count savings.
 - Added a system-prompt nudge for multi-file change replies to open with a one-line verdict followed by at most three decision bullets.
 - Added system-prompt nudge to use a scout subagent for symbol-lookup questions instead of repeated `search_code` calls.

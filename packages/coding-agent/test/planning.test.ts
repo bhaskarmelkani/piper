@@ -19,7 +19,7 @@ describe("planning helpers", () => {
 
 	test("buildPlanningContextMessage describes plan-only behavior", () => {
 		const context: TurnPlanContext = {
-			mode: "manual",
+			mode: "on",
 			path: "/tmp/project/.plans/example.md",
 			template: "# Planning Handoff",
 		};
@@ -29,6 +29,7 @@ describe("planning helpers", () => {
 		expect(message).toContain("Do read-only exploration first");
 		expect(message).toContain("Do not edit any non-.plans files");
 		expect(message).toContain("After the plan file is complete, stop.");
+		expect(message).toContain("Piper will ask whether to execute it");
 		expect(message).toContain(context.path);
 	});
 });
