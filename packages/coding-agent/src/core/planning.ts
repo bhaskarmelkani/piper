@@ -1,6 +1,6 @@
 import { join } from "node:path";
 
-export type TurnPlanningMode = "off" | "manual" | "auto";
+export type TurnPlanningMode = "off" | "on";
 
 export interface TurnPlanContext {
 	mode: Exclude<TurnPlanningMode, "off">;
@@ -72,13 +72,13 @@ export function createTurnPlanContext(
 
 export function buildPlanningContextMessage(plan: TurnPlanContext): string {
 	return [
-		`Planning is active for this turn (${plan.mode}).`,
+		"Planning is active for this turn.",
 		`Do read-only exploration first, then write or update this exact plan file: ${plan.path}`,
 		"Do not ask the user for permission to create or update the plan file.",
 		"Do not edit any non-.plans files or run mutating bash commands while planning is active.",
 		"Keep the final plan concise, grounded in facts, and free of placeholder text.",
 		"Use [!] blocked milestones instead of guessing when requirements are unclear.",
-		"After the plan file is complete, stop. Execution should continue later with plan mode off.",
+		"After the plan file is complete, stop. Piper will ask whether to execute it from a fresh non-plan session.",
 		"",
 		"Use this plan template:",
 		plan.template,

@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Container } from "@mariozechner/pi-tui";
-import { beforeAll, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 import { InteractiveMode } from "../src/modes/interactive/interactive-mode.js";
 import { getMarkdownTheme, initTheme } from "../src/modes/interactive/theme/theme.js";
 
@@ -11,8 +14,16 @@ function renderAll(container: Container, width = 220): string {
 }
 
 describe("InteractiveMode plan/edit controls", () => {
+	const tempDirs: string[] = [];
+
 	beforeAll(() => {
 		initTheme("dark");
+	});
+
+	afterEach(() => {
+		while (tempDirs.length > 0) {
+			rmSync(tempDirs.pop()!, { recursive: true, force: true });
+		}
 	});
 
 	test("setPlanMode persists the flag, rebuilds the prompt, and shows status", () => {
@@ -98,7 +109,8 @@ describe("InteractiveMode plan/edit controls", () => {
 	test("/hotkeys and /shortcut include plan and edit toggles", () => {
 		const fakeThis: any = {
 			chatContainer: new Container(),
-			session: { extensionRunner: undefined },
+			session: { extensionRunner: { getShortcuts: vi.fn().mockReturnValue(new Map()) } },
+			keybindings: { getEffectiveConfig: vi.fn().mockReturnValue({}) },
 			ui: { requestRender: vi.fn() },
 			getMarkdownThemeWithSettings: () => getMarkdownTheme(),
 			getAppKeyDisplay: (action: string) => action,
@@ -110,5 +122,48 @@ describe("InteractiveMode plan/edit controls", () => {
 		const rendered = renderAll(fakeThis.chatContainer);
 		expect(rendered).toContain("Toggle plan mode");
 		expect(rendered).toContain("Toggle edit mode");
+	});
+
+	test("executes a completed plan in a fresh non-plan session when confirmed", async () => {
+		const tempDir = mkdtempSync(join(tmpdir(), "piper-plan-exec-"));
+		tempDirs.push(tempDir);
+		const planPath = join(tempDir, "handoff.md");
+		writeFileSync(planPath, "# Handoff\n\n## Plan\n- [ ] Do the work");
+
+		const newSession = { prompt: vi.fn().mockResolvedValue(undefined) };
+		const oldSession = {
+			consumeCompletedPlanContext: vi.fn().mockReturnValue({ path: planPath }),
+			sessionFile: join(tempDir, "planning-session.jsonl"),
+		};
+		const fakeThis: any = {
+			session: oldSession,
+			runtimeHost: {
+				session: newSession,
+				newSession: vi.fn().mockImplementation(async () => {
+					fakeThis.session = newSession;
+					return { cancelled: false };
+				}),
+			},
+			showExtensionConfirm: vi.fn().mockResolvedValue(true),
+			setPlanMode: vi.fn(),
+			renderCurrentSessionState: vi.fn(),
+			showStatus: vi.fn(),
+			showError: vi.fn(),
+			buildPlanExecutionPrompt: (InteractiveMode as any).prototype.buildPlanExecutionPrompt,
+		};
+
+		await (InteractiveMode as any).prototype.maybeOfferPlanExecution.call(fakeThis);
+
+		expect(fakeThis.showExtensionConfirm).toHaveBeenCalledWith(
+			"Execute plan",
+			expect.stringContaining("Start a fresh session with plan mode off"),
+		);
+		expect(fakeThis.setPlanMode).toHaveBeenCalledWith(false);
+		expect(fakeThis.runtimeHost.newSession).toHaveBeenCalledWith({ parentSession: oldSession.sessionFile });
+		expect(newSession.prompt).toHaveBeenCalledWith(
+			expect.stringContaining("# Handoff"),
+			expect.objectContaining({ suppressSubagentScheduler: true }),
+		);
+		expect(fakeThis.showError).not.toHaveBeenCalled();
 	});
 });

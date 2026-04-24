@@ -105,7 +105,7 @@ describe("AgentSession plan/edit modes", () => {
 					message.role === "custom" &&
 					message.customType === "planning_context" &&
 					message.display === false &&
-					(message.details as { mode?: string } | undefined)?.mode === "manual",
+					(message.details as { mode?: string } | undefined)?.mode === "on",
 			),
 		).toBe(true);
 		expect(existsSync(planPath)).toBe(true);
@@ -168,6 +168,25 @@ describe("AgentSession plan/edit modes", () => {
 		await harness.session.prompt("Create a plan and then keep going");
 
 		expect(harness.getPendingResponseCount()).toBe(1);
-		expect(getLastToolResultText(harness)).toContain("Disable plan mode to execute it.");
+		expect(getLastToolResultText(harness)).toContain("Planning complete. Handoff written to");
+		expect(harness.session.consumeCompletedPlanContext()?.path).toBe(getPlanningPath(harness));
+	});
+
+	it("reports sidebar planning status from the toggle after a plan turn completes", async () => {
+		const harness = await createHarness({ settings: { planMode: true, editMode: true } });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			() =>
+				fauxAssistantMessage([fauxToolCall("write", { path: getPlanningPath(harness), content: "# Plan" })], {
+					stopReason: "toolUse",
+				}),
+		]);
+
+		await harness.session.prompt("Create a plan");
+
+		expect(harness.session.planningModeStatus).toBe("on");
+		harness.settingsManager.setPlanMode(false);
+		expect(harness.session.planningModeStatus).toBe("off");
 	});
 });

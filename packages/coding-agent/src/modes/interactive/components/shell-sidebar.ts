@@ -265,9 +265,11 @@ export class ShellSidebarComponent implements Component {
 		headerGroup.push(blank);
 		headerGroup.push(...labeledSection("Thinking", theme.fg(thinkingTone, thinkingValue)));
 		const planMode = this.session.planningModeStatus;
-		const planTone = planMode === "manual" ? "accent" : planMode === "auto" ? "borderAccent" : "muted";
+		const planEnabled = planMode !== "off";
+		const planTone = planEnabled ? "accent" : "muted";
+		const planValue = planEnabled ? "on" : "off";
 		headerGroup.push(blank);
-		headerGroup.push(...labeledSection("Plan", theme.fg(planTone, planMode)));
+		headerGroup.push(...labeledSection("Plan", theme.fg(planTone, planValue)));
 		const editMode = this.session.editModeEnabled ? "on" : "off";
 		headerGroup.push(blank);
 		headerGroup.push(...labeledSection("Edit", theme.fg(editMode === "on" ? "success" : "warning", editMode)));

@@ -1017,7 +1017,7 @@ export class InteractiveMode {
 		// Process initial messages
 		if (initialMessage) {
 			try {
-				await this.session.prompt(initialMessage, { images: initialImages });
+				await this.promptAndMaybeOfferPlanExecution(initialMessage, { images: initialImages });
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -1027,7 +1027,7 @@ export class InteractiveMode {
 		if (initialMessages) {
 			for (const message of initialMessages) {
 				try {
-					await this.session.prompt(message);
+					await this.promptAndMaybeOfferPlanExecution(message);
 				} catch (error: unknown) {
 					const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 					this.showError(errorMessage);
@@ -1039,7 +1039,7 @@ export class InteractiveMode {
 		while (true) {
 			const userInput = await this.getUserInput();
 			try {
-				await this.session.prompt(userInput);
+				await this.promptAndMaybeOfferPlanExecution(userInput);
 			} catch (error: unknown) {
 				const errorMessage = error instanceof Error ? error.message : "Unknown error occurred";
 				this.showError(errorMessage);
@@ -4332,6 +4332,64 @@ export class InteractiveMode {
 		this.session.rebuildSystemPrompt();
 		this.ui.requestRender();
 		this.showStatus(`Plan mode: ${enabled ? "on" : "off"}`);
+	}
+
+	private buildPlanExecutionPrompt(planPath: string, planContent: string): string {
+		return [
+			"Execute this plan from a fresh session.",
+			`Plan file: ${planPath}`,
+			"",
+			"Follow the milestones in order. Keep the implementation focused on this handoff, update the plan only if execution discovers a real blocker, and run the listed validation checks.",
+			"",
+			planContent.trim(),
+		].join("\n");
+	}
+
+	private async maybeOfferPlanExecution(): Promise<void> {
+		const plan = this.session.consumeCompletedPlanContext();
+		if (!plan) {
+			return;
+		}
+
+		const confirmed = await this.showExtensionConfirm(
+			"Execute plan",
+			`Handoff written to:\n${plan.path}\n\nStart a fresh session with plan mode off and execute it now?`,
+		);
+		if (!confirmed) {
+			this.showStatus("Plan ready");
+			return;
+		}
+
+		let planContent: string;
+		try {
+			planContent = fs.readFileSync(plan.path, "utf-8");
+		} catch (error: unknown) {
+			const message = error instanceof Error ? error.message : String(error);
+			this.showError(`Failed to read plan file: ${message}`);
+			return;
+		}
+
+		this.setPlanMode(false);
+		const parentSession = this.session.sessionFile;
+		const result = await this.runtimeHost.newSession(parentSession ? { parentSession } : undefined);
+		if (result.cancelled) {
+			this.showStatus("Plan execution cancelled");
+			return;
+		}
+
+		this.renderCurrentSessionState();
+		this.showStatus("Executing plan in a fresh session");
+		await this.session.prompt(this.buildPlanExecutionPrompt(plan.path, planContent), {
+			suppressSubagentScheduler: true,
+		});
+	}
+
+	private async promptAndMaybeOfferPlanExecution(
+		text: string,
+		options?: Parameters<AgentSession["prompt"]>[1],
+	): Promise<void> {
+		await this.session.prompt(text, options);
+		await this.maybeOfferPlanExecution();
 	}
 
 	private setEditMode(enabled: boolean): void {
