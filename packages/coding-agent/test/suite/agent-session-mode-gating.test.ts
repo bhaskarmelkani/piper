@@ -10,6 +10,17 @@ function getLastToolResultText(harness: Harness): string {
 	return toolResult ? getMessageText(toolResult) : "";
 }
 
+function getPlanningPath(harness: Harness): string {
+	const planningMessage = harness.session.messages.find(
+		(message) => message.role === "custom" && message.customType === "planning_context",
+	) as { details?: { path?: string } } | undefined;
+	const details = planningMessage?.details;
+	if (!details?.path) {
+		throw new Error("planning_context path not found");
+	}
+	return details.path;
+}
+
 describe("AgentSession plan/edit modes", () => {
 	const harnesses: Harness[] = [];
 
@@ -74,19 +85,19 @@ describe("AgentSession plan/edit modes", () => {
 		);
 	});
 
-	it("allows .plans writes while planning is active even when edit mode is off", async () => {
+	it("allows writes to the current plan file while planning is active even when edit mode is off", async () => {
 		const harness = await createHarness({ settings: { planMode: true, editMode: false } });
 		harnesses.push(harness);
-		const planPath = join(harness.tempDir, ".plans", "manual-plan.md");
 
 		harness.setResponses([
-			fauxAssistantMessage([fauxToolCall("write", { path: ".plans/manual-plan.md", content: "# Plan" })], {
-				stopReason: "toolUse",
-			}),
-			fauxAssistantMessage("done"),
+			() =>
+				fauxAssistantMessage([fauxToolCall("write", { path: getPlanningPath(harness), content: "# Plan" })], {
+					stopReason: "toolUse",
+				}),
 		]);
 
 		await harness.session.prompt("Make a broad multi-file change");
+		const planPath = getPlanningPath(harness);
 
 		expect(
 			harness.session.messages.some(
@@ -99,5 +110,64 @@ describe("AgentSession plan/edit modes", () => {
 		).toBe(true);
 		expect(existsSync(planPath)).toBe(true);
 		expect(readFileSync(planPath, "utf-8")).toBe("# Plan");
+		expect(getLastToolResultText(harness)).toContain("Planning complete. Handoff written to");
+	});
+
+	it("blocks repo writes while planning is active even when edit mode is on", async () => {
+		const harness = await createHarness({ settings: { planMode: true, editMode: true } });
+		harnesses.push(harness);
+		const targetPath = join(harness.tempDir, "blocked.txt");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("write", { path: targetPath, content: "blocked" })], {
+				stopReason: "toolUse",
+			}),
+			() => fauxAssistantMessage(getLastToolResultText(harness)),
+		]);
+
+		await harness.session.prompt("Plan the work, then write the file");
+
+		expect(existsSync(targetPath)).toBe(false);
+		expect(getAssistantTexts(harness)).toContain(
+			`Plan mode is on. Only update the current handoff file: ${getPlanningPath(harness)}`,
+		);
+	});
+
+	it("blocks mutating bash commands while planning is active", async () => {
+		const harness = await createHarness({ settings: { planMode: true, editMode: true } });
+		harnesses.push(harness);
+		const targetPath = join(harness.tempDir, "blocked-from-bash.txt");
+
+		harness.setResponses([
+			fauxAssistantMessage([fauxToolCall("bash", { command: `touch ${targetPath}` })], {
+				stopReason: "toolUse",
+			}),
+			() => fauxAssistantMessage(getLastToolResultText(harness)),
+		]);
+
+		await harness.session.prompt("Plan the work, then touch a file");
+
+		expect(existsSync(targetPath)).toBe(false);
+		expect(getAssistantTexts(harness)).toContain(
+			"Plan mode is on. Bash is limited to read-only exploration commands until you disable plan mode.",
+		);
+	});
+
+	it("terminates after writing the handoff plan instead of continuing into implementation", async () => {
+		const harness = await createHarness({ settings: { planMode: true, editMode: true } });
+		harnesses.push(harness);
+
+		harness.setResponses([
+			() =>
+				fauxAssistantMessage([fauxToolCall("write", { path: getPlanningPath(harness), content: "# Plan" })], {
+					stopReason: "toolUse",
+				}),
+			fauxAssistantMessage("this response should remain unused"),
+		]);
+
+		await harness.session.prompt("Create a plan and then keep going");
+
+		expect(harness.getPendingResponseCount()).toBe(1);
+		expect(getLastToolResultText(harness)).toContain("Disable plan mode to execute it.");
 	});
 });
