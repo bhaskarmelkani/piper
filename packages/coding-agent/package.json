@@ -46,9 +46,7 @@
 		"@mariozechner/pi-agent-core": "^0.4.0",
 		"@mariozechner/pi-ai": "^0.4.0",
 		"@mariozechner/pi-tui": "^0.4.0",
-		"@sinclair/typebox": "^0.34.41",
 		"@silvia-odwyer/photon-node": "^0.3.4",
-		"typebox": "^1.1.24",
 		"chalk": "^5.5.0",
 		"cli-highlight": "^2.1.11",
 		"diff": "^8.0.2",
@@ -62,8 +60,9 @@
 		"node-pty": "^1.1.0-beta39",
 		"proper-lockfile": "^4.1.2",
 		"strip-ansi": "^7.1.0",
+		"typebox": "^1.1.24",
 		"undici": "^7.19.1",
-		"uuid": "^11.1.0",
+		"uuid": "^14.0.0",
 		"yaml": "^2.8.2"
 	},
 	"bundledDependencies": [
@@ -75,7 +74,7 @@
 		"rimraf": "6.1.2"
 	},
 	"optionalDependencies": {
-		"@mariozechner/clipboard": "^0.3.2"
+		"@mariozechner/clipboard": "^0.3.3"
 	},
 	"devDependencies": {
 		"@types/diff": "^7.0.2",
