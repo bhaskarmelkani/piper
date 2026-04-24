@@ -1,5 +1,7 @@
 #!/usr/bin/env bun
-process.title = "piper";
+import { APP_NAME } from "../config.js";
+
+process.title = APP_NAME;
 process.emitWarning = (() => {}) as typeof process.emitWarning;
 
 import "./register-bedrock.js";
