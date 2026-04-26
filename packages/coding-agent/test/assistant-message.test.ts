@@ -7,7 +7,10 @@ const OSC133_ZONE_START = "\x1b]133;A\x07";
 const OSC133_ZONE_END = "\x1b]133;B\x07";
 const OSC133_ZONE_FINAL = "\x1b]133;C\x07";
 
-function createAssistantMessage(content: AssistantMessage["content"]): AssistantMessage {
+function createAssistantMessage(
+	content: AssistantMessage["content"],
+	overrides: Partial<AssistantMessage> = {},
+): AssistantMessage {
 	return {
 		role: "assistant",
 		content,
@@ -24,7 +27,12 @@ function createAssistantMessage(content: AssistantMessage["content"]): Assistant
 		},
 		stopReason: "stop",
 		timestamp: Date.now(),
+		...overrides,
 	};
+}
+
+function getContentBlockComponents(component: AssistantMessageComponent): Array<{ component: unknown }> {
+	return (component as unknown as { contentBlockComponents: Array<{ component: unknown }> }).contentBlockComponents;
 }
 
 describe("AssistantMessageComponent", () => {
@@ -53,5 +61,48 @@ describe("AssistantMessageComponent", () => {
 		expect(rendered.includes(OSC133_ZONE_START)).toBe(false);
 		expect(rendered.includes(OSC133_ZONE_END)).toBe(false);
 		expect(rendered.includes(OSC133_ZONE_FINAL)).toBe(false);
+	});
+
+	test("updates streamed text in place when block structure is unchanged", () => {
+		initTheme("dark");
+
+		const component = new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "hello" }]));
+		const [initialBlock] = getContentBlockComponents(component);
+
+		component.updateContent(createAssistantMessage([{ type: "text", text: "hello world" }]));
+
+		expect(getContentBlockComponents(component)[0]?.component).toBe(initialBlock?.component);
+		expect(component.render(80).join("\n")).toContain("hello world");
+	});
+
+	test("updates visible thinking in place when block structure is unchanged", () => {
+		initTheme("dark");
+
+		const component = new AssistantMessageComponent(
+			createAssistantMessage([{ type: "thinking", thinking: "thinking one" }]),
+		);
+		const [initialBlock] = getContentBlockComponents(component);
+
+		component.updateContent(createAssistantMessage([{ type: "thinking", thinking: "thinking two" }]));
+
+		expect(getContentBlockComponents(component)[0]?.component).toBe(initialBlock?.component);
+		expect(component.render(80).join("\n")).toContain("thinking two");
+	});
+
+	test("falls back to rebuild for aborted messages", () => {
+		initTheme("dark");
+
+		const component = new AssistantMessageComponent(createAssistantMessage([{ type: "text", text: "partial" }]));
+		const [initialBlock] = getContentBlockComponents(component);
+
+		component.updateContent(
+			createAssistantMessage([{ type: "text", text: "partial update" }], {
+				stopReason: "aborted",
+				errorMessage: "Request was aborted",
+			}),
+		);
+
+		expect(getContentBlockComponents(component)[0]?.component).not.toBe(initialBlock?.component);
+		expect(component.render(80).join("\n")).toContain("Operation aborted");
 	});
 });
