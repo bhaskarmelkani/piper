@@ -281,6 +281,35 @@ describe("TUI differential rendering", () => {
 		tui.stop();
 	});
 
+	it("skips writing identical partial render diffs", async () => {
+		const terminal = new LoggingVirtualTerminal(40, 10);
+		const tui = new TUI(terminal);
+		const component = new TestComponent();
+		tui.addChild(component);
+
+		const previousLines = ["Header", "Working old", "Footer"];
+		component.lines = previousLines;
+		tui.start();
+		await terminal.waitForRender();
+		const previousRenderedLines = [...(tui as unknown as { previousLines: string[] }).previousLines];
+
+		component.lines = ["Header", "Working new", "Footer"];
+		tui.requestRender();
+		await terminal.waitForRender();
+		const firstPartialWrite = terminal.getWrites();
+		assert.ok(firstPartialWrite.includes("Working new"), "First partial render should update the changed line");
+
+		terminal.clearWrites();
+		(tui as unknown as { previousLines: string[] }).previousLines = previousRenderedLines;
+
+		tui.requestRender();
+		await terminal.waitForRender();
+
+		assert.strictEqual(terminal.getWrites(), "", "Identical partial render should not write to the terminal");
+
+		tui.stop();
+	});
+
 	it("resets styles after each rendered line", async () => {
 		const terminal = new VirtualTerminal(20, 6);
 		const tui = new TUI(terminal);
