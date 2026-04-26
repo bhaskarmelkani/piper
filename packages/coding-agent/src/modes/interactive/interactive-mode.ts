@@ -58,6 +58,7 @@ import {
 } from "../../config.js";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.js";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.js";
+import type { BashResult } from "../../core/bash-executor.js";
 import type {
 	AutocompleteProviderFactory,
 	ExtensionCommandContext,
@@ -129,6 +130,7 @@ import {
 	type ThemeColor,
 	theme,
 } from "./theme/theme.js";
+import { UserShellSession } from "./user-shell-session.js";
 
 /** Interface for components that can be expanded/collapsed */
 interface Expandable {
@@ -302,6 +304,7 @@ export class InteractiveMode {
 
 	// Track current bash execution component
 	private bashComponent: BashExecutionComponent | undefined = undefined;
+	private userShellSession: UserShellSession | undefined = undefined;
 
 	// Track pending bash components (shown in pending area, moved to chat on submit)
 	private pendingBashComponents: BashExecutionComponent[] = [];
@@ -2390,6 +2393,8 @@ export class InteractiveMode {
 		this.defaultEditor.onEscape = () => {
 			if (this.session.isStreaming) {
 				this.restoreQueuedMessagesToEditor({ abort: true });
+			} else if (this.userShellSession?.isCommandRunning) {
+				this.userShellSession.abortActiveCommand();
 			} else if (this.session.isBashRunning) {
 				this.session.abortBash();
 			} else if (this.isBashMode) {
@@ -2606,7 +2611,7 @@ export class InteractiveMode {
 				const isExcluded = text.startsWith("!!");
 				const command = isExcluded ? text.slice(2).trim() : text.slice(1).trim();
 				if (command) {
-					if (this.session.isBashRunning) {
+					if (this.session.isBashRunning || this.userShellSession?.isCommandRunning) {
 						this.showWarning("A bash command is already running. Press Esc to cancel it first.");
 						this.editor.setText(text);
 						return;
@@ -5387,16 +5392,18 @@ export class InteractiveMode {
 		this.ui.requestRender();
 
 		try {
-			const result = await this.session.executeBash(
-				command,
-				(chunk) => {
-					if (this.bashComponent) {
-						this.bashComponent.appendOutput(chunk);
-						this.ui.requestRender();
-					}
-				},
-				{ excludeFromContext, operations: eventResult?.operations },
-			);
+			const onChunk = (chunk: string) => {
+				if (this.bashComponent) {
+					this.bashComponent.appendOutput(chunk);
+					this.ui.requestRender();
+				}
+			};
+			const result = eventResult?.operations
+				? await this.session.executeBash(command, onChunk, {
+						excludeFromContext,
+						operations: eventResult.operations,
+					})
+				: await this.executeUserShellCommand(command, onChunk, excludeFromContext);
 
 			if (this.bashComponent) {
 				this.bashComponent.setComplete(
@@ -5415,6 +5422,17 @@ export class InteractiveMode {
 
 		this.bashComponent = undefined;
 		this.ui.requestRender();
+	}
+
+	private async executeUserShellCommand(
+		command: string,
+		onChunk: (chunk: string) => void,
+		excludeFromContext: boolean,
+	): Promise<BashResult> {
+		this.userShellSession ??= new UserShellSession({ cwd: this.sessionManager.getCwd() });
+		const result = await this.userShellSession.execute(command, onChunk);
+		this.session.recordBashResult(command, result, { excludeFromContext });
+		return result;
 	}
 
 	private async handleCompactCommand(customInstructions?: string): Promise<void> {
@@ -5449,6 +5467,8 @@ export class InteractiveMode {
 			this.loadingAnimation = undefined;
 		}
 		this.clearExtensionTerminalInputListeners();
+		void this.userShellSession?.dispose();
+		this.userShellSession = undefined;
 		this.footer.dispose();
 		this.footerDataProvider.dispose();
 		if (this.unsubscribe) {
