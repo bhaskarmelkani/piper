@@ -15,6 +15,12 @@ const copilotModel: Model<Api> = {
 	maxTokens: 4096,
 };
 
+const unknownCopilotModel: Model<Api> = {
+	...copilotModel,
+	id: "retired-preview-model",
+	name: "Retired Preview Model",
+};
+
 describe("Copilot model policies", () => {
 	afterEach(() => {
 		vi.restoreAllMocks();
@@ -59,6 +65,7 @@ describe("Copilot model policies", () => {
 					data: [
 						{ id: "gpt-4.1", premium_requests_multiplier: 0, is_disabled: false },
 						{ id: "gpt-5.2", premium_requests_multiplier: 1, is_disabled: true },
+						{ id: "retired-preview-model", is_disabled: false },
 					],
 				}),
 				{ status: 200, headers: { "content-type": "application/json" } },
@@ -79,22 +86,24 @@ describe("Copilot model policies", () => {
 			new Map([
 				["gpt-4.1", { multiplier: 0, disabled: false }],
 				["gpt-5.2", { multiplier: 1, disabled: true }],
+				["retired-preview-model", { multiplier: undefined, disabled: false }],
 			]),
 		);
 	});
 
-	it("returns undefined when the Copilot policy fetch fails", async () => {
+	it("falls back to static known Copilot models when the policy fetch fails", async () => {
 		vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network down"));
 
 		const state = await COPILOT_MODEL_VISIBILITY_ADAPTER.refresh({
 			provider: "github-copilot",
-			models: [copilotModel],
+			models: [copilotModel, unknownCopilotModel],
 			context: {
 				hasConfiguredAuth: () => true,
 				getApiKeyAndHeaders: async () => ({ ok: true, apiKey: "token" }),
 			},
 		});
 
-		expect(state).toBeUndefined();
+		expect(state?.visibleModelIds).toEqual(new Set(["gpt-4.1"]));
+		expect(state?.metadata).toEqual(new Map([["gpt-4.1", { multiplier: 0, disabled: false }]]));
 	});
 });

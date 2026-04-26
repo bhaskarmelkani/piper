@@ -129,8 +129,7 @@ function getModelProviderBadge(model: AgentSession["model"]): string {
 	}
 
 	const multiplier = COPILOT_MULTIPLIERS[model.id];
-	const multiplierBadge = multiplier !== undefined ? ` · x${multiplier}` : "";
-	return theme.fg("dim", `(${model.provider}${multiplierBadge})`);
+	return multiplier !== undefined ? theme.fg("dim", `(x${multiplier})`) : theme.fg("dim", "(github-copilot)");
 }
 
 export class ShellSidebarComponent implements Component {
@@ -268,11 +267,17 @@ export class ShellSidebarComponent implements Component {
 		const planEnabled = planMode !== "off";
 		const planTone = planEnabled ? "accent" : "muted";
 		const planValue = planEnabled ? "on" : "off";
-		headerGroup.push(blank);
-		headerGroup.push(...labeledSection("Plan", theme.fg(planTone, planValue)));
 		const editMode = this.session.editModeEnabled ? "on" : "off";
 		headerGroup.push(blank);
-		headerGroup.push(...labeledSection("Edit", theme.fg(editMode === "on" ? "success" : "warning", editMode)));
+		headerGroup.push(
+			...compactSection(
+				"Modes",
+				`${theme.fg("muted", "plan ")}${theme.fg(planTone, planValue)} ${theme.fg("muted", "edit ")}${theme.fg(
+					editMode === "on" ? "success" : "warning",
+					editMode,
+				)}`,
+			),
+		);
 		topGroups.push(headerGroup);
 
 		let totalInput = 0;

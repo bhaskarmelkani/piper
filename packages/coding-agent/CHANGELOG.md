@@ -12,6 +12,8 @@
 
 ### Fixed
 
+- Fixed Copilot model selection to keep hidden/disabled models out of `/model` even when the live Copilot policy refresh fails, preserving Piper's static known-model fallback after upstream model-registry refactors.
+- Fixed Piper shell integration after upstream sidebar/mode-state changes so dock hints stay above transient content and the compact sidebar does not clip context, capability, and workspace sections at normal heights.
 - Fixed `search_code` flag injection: queries starting with `--` (for example `--models`) no longer get parsed as ripgrep flags, because a `--` separator is now inserted before the query in all keyword and regex invocations.
 - Fixed AJV enum error formatter in tool-call validation to use `err.params.allowedValue` when available, ensuring "must be one of: …" messages always include the allowed values.
 - Fixed transcript spacing so turn boundaries before each user message, compaction summary, and branch summary now use two blank lines instead of one.

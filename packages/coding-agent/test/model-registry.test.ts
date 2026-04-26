@@ -120,7 +120,7 @@ describe("ModelRegistry", () => {
 			).toEqual(new Map([["gpt-4.1", { multiplier: 0, disabled: false }]]));
 		});
 
-		test("built-in Copilot adapter remains non-authoritative when the policy fetch fails", async () => {
+		test("built-in Copilot adapter falls back to static known models when the policy fetch fails", async () => {
 			authStorage.set("github-copilot", { type: "api_key", key: "TEST_KEY" });
 			const registry = ModelRegistry.create(authStorage, modelsJsonPath);
 
@@ -131,7 +131,15 @@ describe("ModelRegistry", () => {
 
 			expect(copilotIds).toContain("gpt-4.1");
 			expect(copilotIds).toContain("gpt-5.2");
-			expect(registry.getModelVisibilityMetadata("github-copilot")).toBeUndefined();
+			expect(copilotIds).not.toContain("gpt-5.1-codex-max");
+			expect(
+				registry
+					.getModelVisibilityMetadata<{ multiplier?: number; disabled: boolean }>("github-copilot")
+					?.get("gpt-4.1"),
+			).toEqual({
+				multiplier: 0,
+				disabled: false,
+			});
 		});
 
 		test("extension providers can register their own model visibility adapter", async () => {

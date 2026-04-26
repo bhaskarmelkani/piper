@@ -44,6 +44,24 @@ export const COPILOT_MULTIPLIERS: Record<string, number> = {
 	"grok-code-fast-1": 0.25,
 };
 
+function hasKnownCopilotMultiplier(modelId: string, policy?: CopilotModelPolicy): boolean {
+	return policy?.multiplier !== undefined || COPILOT_MULTIPLIERS[modelId] !== undefined;
+}
+
+function createStaticCopilotVisibilityState(models: readonly { id: string }[]) {
+	const metadata = new Map<string, CopilotModelPolicy>();
+	const visibleModelIds = new Set<string>();
+
+	for (const model of models) {
+		const multiplier = COPILOT_MULTIPLIERS[model.id];
+		if (multiplier === undefined) continue;
+		metadata.set(model.id, { multiplier, disabled: false });
+		visibleModelIds.add(model.id);
+	}
+
+	return { visibleModelIds, metadata };
+}
+
 /**
  * Fetches model policies from the Copilot API to get premium multipliers and disabled status.
  * Returns a map of modelId -> policy on success, including an empty map when Copilot reports no models.
@@ -109,11 +127,15 @@ export const COPILOT_MODEL_VISIBILITY_ADAPTER: ProviderModelVisibilityAdapter<Co
 
 		const policies = await fetchCopilotModelPolicies(auth.apiKey, copilotModel.baseUrl);
 		if (!policies) {
-			return undefined;
+			return createStaticCopilotVisibilityState(models);
 		}
 
 		return {
-			visibleModelIds: new Set([...policies.entries()].filter(([, policy]) => !policy.disabled).map(([id]) => id)),
+			visibleModelIds: new Set(
+				[...policies.entries()]
+					.filter(([id, policy]) => !policy.disabled && hasKnownCopilotMultiplier(id, policy))
+					.map(([id]) => id),
+			),
 			metadata: policies,
 		};
 	},

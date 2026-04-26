@@ -16,6 +16,8 @@ Before resolving conflicts, open `plans/HISTORY.md` to find the relevant plan tr
   The shell layout, sidebar behavior, prompt ergonomics, scrolling, and branding live here.
 - `packages/coding-agent/src/core/planning.ts`, `packages/coding-agent/src/core/agent-session.ts`, `packages/coding-agent/src/core/system-prompt.ts`
   Plan-mode behavior, `.plans` handoff structure, and plan-only mutation gating live here. Preserve piper's handoff-first semantics unless a plan record explicitly changes them.
+- `packages/coding-agent/src/utils/copilot-model-policies.ts`, `packages/coding-agent/src/core/model-registry.ts`, `packages/coding-agent/src/modes/interactive/components/model-selector.ts`
+  Piper's model picker hides disabled, omitted, and unknown Copilot models. Preserve the live-policy plus static-allowlist behavior when upstream changes model registry or generated model handling.
 - `packages/coding-agent/src/core/subagents/scheduler.ts`, `packages/coding-agent/src/core/tools/subagent.ts`
   Subagent scheduling should not run automatically while plan mode is on. Planning sidecars should produce handoff-oriented findings, not separate plan files.
 - `packages/tui/src/`
@@ -57,5 +59,6 @@ Source stays runtime-agnostic whenever practical.
 - `piper --version` works from the repo root and from another working directory.
 - Interactive prompts still render in the bottom dock rather than taking over the terminal.
 - Sidebar extensions still map into canonical section ordering and semantic colors.
+- Copilot `/model` selection still hides disabled/unknown generated models when the live policy refresh succeeds or fails.
 - Scroll, resize, and render diff changes stay in the minimal shared layer needed for correctness.
 - No new Node-only assumptions were added to active piper runtime paths without an explicit reason.

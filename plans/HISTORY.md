@@ -11,6 +11,14 @@ Keep entries short. The detailed record belongs in the linked plan.
 
 ## Entries
 
+### 2026-04-24 — model selection stability
+
+- Scope: restored Piper's Copilot model picker guardrails after the upstream visibility-adapter refactor so disabled, omitted, or unknown generated Copilot models stay hidden
+- Why it matters for upstream sync: model-registry and generated-model changes can accidentally turn the picker back into a raw upstream model dump
+- Source:
+  - `plans/model-selection-stability/README.md`
+  - `docs/upstream-sync.md`
+
 ### 2026-04-23 — lean built-in plan-only mode
 
 - Scope: converted built-in planning in `packages/coding-agent` into an explicit toggle-only handoff flow with a lean `.plans` contract and fresh-session execution prompt
